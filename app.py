@@ -48,6 +48,12 @@ def hello_health():
     return jsonify({"message": "hello"}), 200
 
 
+@app.get("/health")
+def health():
+    """Load-balancer friendly health check; same payload as /hello."""
+    return hello_health()
+
+
 @app.get("/api/civic/representatives")
 def civic_representatives():
     """Looks up elected representatives for an address via Google Civic Information API."""
