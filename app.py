@@ -1,11 +1,14 @@
 import os
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-load_dotenv()
+# Load `.env` next to this file so the key is found even if the process cwd differs
+# (e.g. IDE run configs, Flask reloader). Restart the server after editing `.env`.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
 
@@ -54,23 +57,45 @@ def health():
     return hello_health()
 
 
-@app.get("/api/civic/representatives")
-def civic_representatives():
-    """Looks up elected representatives for an address via Google Civic Information API."""
-    api_key = os.environ.get("GOOGLE_CIVIC_API_KEY", "").strip()
-    if not api_key:
-        return jsonify(
+def _missing_civic_key_response():
+    return (
+        jsonify(
             {
                 "error": "Missing GOOGLE_CIVIC_API_KEY",
-                "hint": "Set it in the environment or in a .env file (see .env.example).",
+                "hint": (
+                    "Set GOOGLE_CIVIC_API_KEY in `.env` (see .env.example) or the environment, "
+                    "then fully restart this server (stop and start; required after creating/editing `.env`)."
+                ),
             }
-        ), 503
+        ),
+        503,
+    )
+
+
+@app.get("/api/civic/representatives")
+def civic_representatives_gone():
+    """Google turned down the Representatives API in 2025; use divisions-by-address instead."""
+    return jsonify(
+        {
+            "error": "The Google Civic Representatives API is no longer available.",
+            "use_instead": "/api/civic/divisions-by-address",
+            "hint": "Use GET /api/civic/divisions-by-address?address=... for OCD division IDs (see Google Civic docs).",
+        }
+    ), 410
+
+
+@app.get("/api/civic/divisions-by-address")
+def civic_divisions_by_address():
+    """Looks up political geographic divisions (OCD IDs) for an address via Google Civic Information API."""
+    api_key = os.environ.get("GOOGLE_CIVIC_API_KEY", "").strip()
+    if not api_key:
+        return _missing_civic_key_response()
 
     address = request.args.get("address", "").strip()
     if not address:
         return jsonify({"error": "Query parameter 'address' is required"}), 400
 
-    url = f"{GOOGLE_CIVIC_BASE}/representatives"
+    url = f"{GOOGLE_CIVIC_BASE}/divisionsByAddress"
     resp = requests.get(
         url,
         params={"address": address, "key": api_key},
@@ -83,7 +108,20 @@ def civic_representatives():
     return jsonify(data), resp.status_code
 
 
+def _wants_debug() -> bool:
+    """True if FLASK_DEBUG or DEBUG is set to a truthy value (1, true, yes). Default off."""
+    for name in ("FLASK_DEBUG", "DEBUG"):
+        if os.environ.get(name, "").strip().lower() in ("1", "true", "yes"):
+            return True
+    return False
+
+
 if __name__ == "__main__":
     # Bind all interfaces so real devices on Wi‑Fi can reach this API (LAN IP).
     # Equivalent CLI: flask run --host=0.0.0.0 --port=5000
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
+    # Set FLASK_DEBUG=1 (or DEBUG=1) for the interactive debugger and reloader.
+    app.run(
+        debug=_wants_debug(),
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "5000")),
+    )
