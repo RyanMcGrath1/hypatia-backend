@@ -35,8 +35,13 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`. Neve
 Optional environment variables:
 
 - `FRED_API_KEY` — [FRED (Federal Reserve Economic Data)](https://fred.stlouisfed.org/docs/api/api_key.html) API key; reserved for future FRED-backed routes (not read by the app yet)
-- `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra CORS origins for Expo web
+- `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
+- `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5000`)
+
+### CORS (Expo on your PC and on a phone)
+
+The API listens on `0.0.0.0`, so on your phone use your computer’s **LAN IP** and port (e.g. `http://192.168.1.71:5000`). CORS allows typical Expo/Metro dev origins: `localhost` / `127.0.0.1` on any port, and `http://<private-LAN-ip>:<port>` (so when the phone loads the bundle from `http://192.168.x.x:8081`, browser preflights still succeed). For tunnels or odd origins, add them to `EXPO_CORS_EXTRA_ORIGINS`. If something still blocks requests during local dev only, set `CORS_ALLOW_ALL_ORIGINS=1` in `.env`.
 - `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
 
 ## Run locally

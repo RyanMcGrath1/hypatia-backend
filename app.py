@@ -13,14 +13,39 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = Flask(__name__)
 
 
-def _expo_web_cors_origins() -> list:
-    """Origins for Expo web dev server (localhost, loopback, typical LAN, optional extras)."""
+def _expo_cors_origins():
+    """Origins allowed for local Expo / React Native dev (machine + phone on LAN).
+
+    Covers Metro/Expo dev server on common ports, any port on localhost, and private
+    LAN ranges so a physical device can load JS from http://<your-pc-ip>:8081 (etc.)
+    while calling this API. Set CORS_ALLOW_ALL_ORIGINS=1 for maximum permissiveness
+    during local dev only (do not use in production).
+    """
+    if os.environ.get("CORS_ALLOW_ALL_ORIGINS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return "*"
+
     origins: list = [
+        # Expo / Metro often use 8081; also 19000, 19006, 8082, etc.
         "http://localhost:8081",
         "http://127.0.0.1:8081",
-        r"^http://\[::1\]:8081$",
-        r"^http://192\.168\.\d{1,3}\.\d{1,3}:8081$",
-        r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:8081$",
+        "http://localhost:19000",
+        "http://127.0.0.1:19000",
+        "http://localhost:19006",
+        "http://127.0.0.1:19006",
+        # Any port on loopback (simulator, Expo web, alternate Metro ports)
+        r"^http://localhost:\d+$",
+        r"^http://127\.0\.0\.1:\d+$",
+        r"^http://\[::1\]:\d+$",
+        # Phone on Wi‑Fi: bundle from http://<lan-ip>:<metro-port>
+        r"^http://192\.168\.\d{1,3}\.\d{1,3}:\d+$",
+        r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$",
+        r"^http://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:\d+$",
+        # Some WebView / RN stacks send Origin: null
+        "null",
     ]
     extra = os.environ.get("EXPO_CORS_EXTRA_ORIGINS", "")
     for o in extra.split(","):
@@ -32,8 +57,8 @@ def _expo_web_cors_origins() -> list:
 
 CORS(
     app,
-    origins=_expo_web_cors_origins(),
-    methods=["GET", "POST", "OPTIONS", "HEAD"],
+    origins=_expo_cors_origins(),
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
