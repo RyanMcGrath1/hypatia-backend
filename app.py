@@ -51,7 +51,7 @@ def hello_health():
 @app.get("/api/civic/representatives")
 def civic_representatives():
     """Looks up elected representatives for an address via Google Civic Information API."""
-    api_key = "AIzaSyDAij8QlehdXveIEku99G0NDiDUrmr_bvM"
+    api_key = os.environ.get("GOOGLE_CIVIC_API_KEY", "").strip()
     if not api_key:
         return jsonify(
             {
