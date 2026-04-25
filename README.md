@@ -1,6 +1,6 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary, and health checks).
 
 ## Requirements
 
@@ -30,19 +30,23 @@ Optional dev / test tools:
 pip install -r requirements-dev.txt
 ```
 
-Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`. Never commit `.env`.
+Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY` and `FRED_API_KEY` (for economy routes). Never commit `.env`.
+
+**API keys**
+
+- `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for `GET /api/economy/summary`
 
 Optional environment variables:
 
-- `FRED_API_KEY` — [FRED (Federal Reserve Economic Data)](https://fred.stlouisfed.org/docs/api/api_key.html) API key; reserved for future FRED-backed routes (not read by the app yet)
 - `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5000`)
+- `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
 
 ### CORS (Expo on your PC and on a phone)
 
 The API listens on `0.0.0.0`, so on your phone use your computer’s **LAN IP** and port (e.g. `http://192.168.1.71:5000`). CORS allows typical Expo/Metro dev origins: `localhost` / `127.0.0.1` on any port, and `http://<private-LAN-ip>:<port>` (so when the phone loads the bundle from `http://192.168.x.x:8081`, browser preflights still succeed). For tunnels or odd origins, add them to `EXPO_CORS_EXTRA_ORIGINS`. If something still blocks requests during local dev only, set `CORS_ALLOW_ALL_ORIGINS=1` in `.env`.
-- `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
 
 ## Run locally
 
@@ -81,8 +85,26 @@ gunicorn -w 2 -b 0.0.0.0:5000 wsgi:app
 | GET | `/health` | Same JSON as `/hello` (load balancers) |
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
+| GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
 
 If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`).
+
+### Economy summary (`/api/economy/summary`)
+
+Returns **HTTP 200** with:
+
+- `as_of`: ISO-8601 UTC timestamp when the snapshot was built.
+- `tiles`: object keyed by `tile_id`. Each value is either a success object (`label`, `series_id`, `unit`, `value`, `observation_date`, and optionally `change`, `prior_observation_date`) or an error object (`error`, optional `hint`) if that series failed.
+
+If `FRED_API_KEY` is missing, the route returns **503** with `error` `Missing FRED_API_KEY` (same pattern as the civic key).
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5000/api/economy/summary"
+```
+
+(PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)
 
 ### Google Civic API note
 

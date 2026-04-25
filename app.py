@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+from economy import build_economy_summary
+
 # Load `.env` next to this file so the key is found even if the process cwd differs
 # (e.g. IDE run configs, Flask reloader). Restart the server after editing `.env`.
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -97,6 +99,21 @@ def _missing_civic_key_response():
     )
 
 
+def _missing_fred_key_response():
+    return (
+        jsonify(
+            {
+                "error": "Missing FRED_API_KEY",
+                "hint": (
+                    "Set FRED_API_KEY in `.env` (see .env.example) or the environment, "
+                    "then fully restart this server (stop and start; required after creating/editing `.env`)."
+                ),
+            }
+        ),
+        503,
+    )
+
+
 @app.get("/api/civic/representatives")
 def civic_representatives_gone():
     """Google turned down the Representatives API in 2025; use divisions-by-address instead."""
@@ -131,6 +148,25 @@ def civic_divisions_by_address():
     except ValueError:
         return jsonify({"error": "Invalid response from Google Civic API"}), 502
     return jsonify(data), resp.status_code
+
+
+# --- Economy (FRED) ---
+# Single snapshot GET /api/economy/summary: all v1 tiles use the same FRED
+# `series/observations` upstream, so one client round-trip, one shared `as_of`,
+# parallel upstream fetches (see economy.py), and saner rate-limit behavior than
+# N separate client→server→FRED chains. Partial upstream failures return HTTP 200
+# with per-tile `error` / `hint` so the client can still render other tiles.
+
+
+@app.get("/api/economy/summary")
+def economy_summary():
+    """Latest (and optional prior) FRED observations for configured economy tiles."""
+    api_key = os.environ.get("FRED_API_KEY", "").strip()
+    if not api_key:
+        return _missing_fred_key_response()
+
+    payload = build_economy_summary(api_key)
+    return jsonify(payload), 200
 
 
 def _wants_debug() -> bool:
