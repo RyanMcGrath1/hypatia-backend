@@ -30,23 +30,24 @@ Optional dev / test tools:
 pip install -r requirements-dev.txt
 ```
 
-Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY` and `FRED_API_KEY` (for economy routes). Never commit `.env`.
+Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRED_API_KEY` (economy routes), and `GNEWS_API_KEY` (news routes) as needed. Never commit `.env`.
 
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
 - `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for `GET /api/economy/summary`
+- `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
 
 Optional environment variables:
 
 - `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
-- `PORT` — listen port when using `python app.py` (default `5000`)
+- `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)
 - `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
 
 ### CORS (Expo on your PC and on a phone)
 
-The API listens on `0.0.0.0`, so on your phone use your computer’s **LAN IP** and port (e.g. `http://192.168.1.71:5000`). CORS allows typical Expo/Metro dev origins: `localhost` / `127.0.0.1` on any port, and `http://<private-LAN-ip>:<port>` (so when the phone loads the bundle from `http://192.168.x.x:8081`, browser preflights still succeed). For tunnels or odd origins, add them to `EXPO_CORS_EXTRA_ORIGINS`. If something still blocks requests during local dev only, set `CORS_ALLOW_ALL_ORIGINS=1` in `.env`.
+The API listens on `0.0.0.0`, so on your phone use your computer’s **LAN IP** and port (e.g. `http://192.168.1.71:5001`). CORS allows typical Expo/Metro dev origins: `localhost` / `127.0.0.1` on any port, and `http://<private-LAN-ip>:<port>` (so when the phone loads the bundle from `http://192.168.x.x:8081`, browser preflights still succeed). For tunnels or odd origins, add them to `EXPO_CORS_EXTRA_ORIGINS`. If something still blocks requests during local dev only, set `CORS_ALLOW_ALL_ORIGINS=1` in `.env`.
 
 ## Run locally
 
@@ -65,7 +66,7 @@ pytest
 Or with the Flask CLI:
 
 ```bash
-flask --app app run --host 0.0.0.0 --port 5000
+flask --app app run --host 0.0.0.0 --port 5001
 ```
 
 ## Production (WSGI)
@@ -73,7 +74,7 @@ flask --app app run --host 0.0.0.0 --port 5000
 Use [wsgi.py](wsgi.py) with Gunicorn:
 
 ```bash
-gunicorn -w 2 -b 0.0.0.0:5000 wsgi:app
+gunicorn -w 2 -b 0.0.0.0:5001 wsgi:app
 ```
 
 ## Routes
@@ -86,8 +87,10 @@ gunicorn -w 2 -b 0.0.0.0:5000 wsgi:app
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
 | GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
+| GET | `/api/news/top-headlines` | Proxies [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) (`category`, `lang`, `country`, `max`, `q`, …); key from `GNEWS_API_KEY` |
+| GET | `/api/news/search` | Proxies [GNews search](https://docs.gnews.io/endpoints/search-endpoint); requires `q`; optional `lang`, `max`, `sortby`, … |
 
-If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`).
+If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return `503` with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset.
 
 ### Economy summary (`/api/economy/summary`)
 
@@ -101,7 +104,7 @@ If `FRED_API_KEY` is missing, the route returns **503** with `error` `Missing FR
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5000/api/economy/summary"
+curl -sS "http://127.0.0.1:5001/api/economy/summary"
 ```
 
 (PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)

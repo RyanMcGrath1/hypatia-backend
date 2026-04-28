@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from economy import build_economy_summary
+from news import SEARCH_PARAMS, TOP_HEADLINES_PARAMS, fetch_gnews, filter_query_args
 
 # Load `.env` next to this file so the key is found even if the process cwd differs
 # (e.g. IDE run configs, Flask reloader). Restart the server after editing `.env`.
@@ -114,6 +115,21 @@ def _missing_fred_key_response():
     )
 
 
+def _missing_gnews_key_response():
+    return (
+        jsonify(
+            {
+                "error": "Missing GNEWS_API_KEY",
+                "hint": (
+                    "Set GNEWS_API_KEY in `.env` (see .env.example) or the environment, "
+                    "then fully restart this server (stop and start; required after creating/editing `.env`)."
+                ),
+            }
+        ),
+        503,
+    )
+
+
 @app.get("/api/civic/representatives")
 def civic_representatives_gone():
     """Google turned down the Representatives API in 2025; use divisions-by-address instead."""
@@ -169,6 +185,39 @@ def economy_summary():
     return jsonify(payload), 200
 
 
+# --- GNews (https://gnews.io/api/v4) ---
+# Proxies top headlines and search; API key stays server-side only.
+
+
+@app.get("/api/news/top-headlines")
+def news_top_headlines():
+    """Trending articles (GNews top-headlines); optional category, lang, country, max, q, etc."""
+    api_key = os.environ.get("GNEWS_API_KEY", "").strip()
+    if not api_key:
+        return _missing_gnews_key_response()
+
+    query = filter_query_args(request.args, TOP_HEADLINES_PARAMS)
+    data, status = fetch_gnews("top-headlines", query, api_key)
+    return jsonify(data), status
+
+
+@app.get("/api/news/search")
+def news_search():
+    """Keyword search over articles; requires query parameter q."""
+    api_key = os.environ.get("GNEWS_API_KEY", "").strip()
+    if not api_key:
+        return _missing_gnews_key_response()
+
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "Query parameter 'q' is required"}), 400
+
+    query = filter_query_args(request.args, SEARCH_PARAMS)
+    query["q"] = q
+    data, status = fetch_gnews("search", query, api_key)
+    return jsonify(data), status
+
+
 def _wants_debug() -> bool:
     """True if FLASK_DEBUG or DEBUG is set to a truthy value (1, true, yes). Default off."""
     for name in ("FLASK_DEBUG", "DEBUG"):
@@ -179,10 +228,10 @@ def _wants_debug() -> bool:
 
 if __name__ == "__main__":
     # Bind all interfaces so real devices on Wi‑Fi can reach this API (LAN IP).
-    # Equivalent CLI: flask run --host=0.0.0.0 --port=5000
+    # Equivalent CLI: flask run --host=0.0.0.0 --port=5001
     # Set FLASK_DEBUG=1 (or DEBUG=1) for the interactive debugger and reloader.
     app.run(
         debug=_wants_debug(),
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", "5000")),
+        port=int(os.environ.get("PORT", "5001")),
     )
