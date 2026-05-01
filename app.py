@@ -7,7 +7,12 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from economy import build_economy_summary
-from news import SEARCH_PARAMS, TOP_HEADLINES_PARAMS, fetch_gnews, filter_query_args
+from news import (
+    SEARCH_PARAMS,
+    build_top_headlines_envelope,
+    fetch_gnews,
+    filter_query_args,
+)
 
 # Load `.env` next to this file so the key is found even if the process cwd differs
 # (e.g. IDE run configs, Flask reloader). Restart the server after editing `.env`.
@@ -191,13 +196,12 @@ def economy_summary():
 
 @app.get("/api/news/top-headlines")
 def news_top_headlines():
-    """Trending articles (GNews top-headlines); optional category, lang, country, max, q, etc."""
+    """GNews top headlines with page/max pagination (see README)."""
     api_key = os.environ.get("GNEWS_API_KEY", "").strip()
     if not api_key:
         return _missing_gnews_key_response()
 
-    query = filter_query_args(request.args, TOP_HEADLINES_PARAMS)
-    data, status = fetch_gnews("top-headlines", query, api_key)
+    data, status = build_top_headlines_envelope(request.args, api_key)
     return jsonify(data), status
 
 

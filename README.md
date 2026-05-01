@@ -1,6 +1,6 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary, and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary, GNews proxy for headlines and search, and health checks).
 
 ## Requirements
 
@@ -57,6 +57,8 @@ Development (binds `0.0.0.0` so LAN devices can reach the server). Enable the de
 python app.py
 ```
 
+With no `PORT` in `.env`, the server listens on **5001** (see optional env vars above). Use `source .venv/bin/activate` before `python app.py` if `python` is not on your PATH.
+
 Run tests:
 
 ```bash
@@ -87,10 +89,10 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:app
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
 | GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
-| GET | `/api/news/top-headlines` | Proxies [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) (`category`, `lang`, `country`, `max`, `q`, …); key from `GNEWS_API_KEY` |
-| GET | `/api/news/search` | Proxies [GNews search](https://docs.gnews.io/endpoints/search-endpoint); requires `q`; optional `lang`, `max`, `sortby`, … |
+| GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
+| GET | `/api/news/search` | Proxies [GNews search](https://docs.gnews.io/endpoints/search-endpoint); requires `q`; see [News routes](#news-routes) |
 
-If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return `503` with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset.
+If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset.
 
 ### Economy summary (`/api/economy/summary`)
 
@@ -108,6 +110,44 @@ curl -sS "http://127.0.0.1:5001/api/economy/summary"
 ```
 
 (PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)
+
+### News routes
+
+Both routes use [GNews API v4](https://gnews.io/docs/v4). The server adds **`apikey`** from `GNEWS_API_KEY` only (never from the client).
+
+#### `GET /api/news/search`
+
+Query parameters are **whitelisted and forwarded** to GNews as before (for example `q` required, optional `lang`, `max`, …). Omitting `max` leaves it to GNews defaults.
+
+#### `GET /api/news/top-headlines` (lazy loading)
+
+Pagination uses **1-based `page`** and **`max`** as page size (sent to GNews). **Backward compatible:** omitting both behaves like **page 1**; omitting **`max`** alone defaults to **20** and caps at **50** (abuse clamp).
+
+Optional **`offset`** (0-based): if you omit `page`, `offset` must be a **multiple of `max`**; the server derives `page = offset // max + 1`. If you send **both** `page` and `offset`, they must agree: `offset === (page - 1) * max`. Invalid combinations return **400** with a JSON `error` string.
+
+The **`_`** query key (cache buster) is ignored and **not** forwarded upstream.
+
+**Response (200):** `items` and `articles` are the **same** array (compat with parsers that expect either key). Pagination fields: `hasMore`, `nextPage`, `nextOffset`, `nextCursor` (always `null`; use `nextPage` / `nextOffset`), `page`, `max`, `total` (from GNews `totalArticles` when present). **`hasMore`** is false when this page returns **fewer than `max`** articles (partial last page) or when `total` implies there is no next page. Articles are **sorted** by `publishedAt` descending, then `url`, for stable ordering within the page.
+
+**Ordering:** Within each page, results are sorted as above. Across pages, ordering follows GNews paging for the same `page` / `max` / filters.
+
+Examples (port **5001**):
+
+```bash
+# First page (default max=20)
+curl -sS "http://127.0.0.1:5001/api/news/top-headlines?lang=en"
+
+# Page size 10, second page, optional category
+curl -sS "http://127.0.0.1:5001/api/news/top-headlines?lang=en&max=10&page=2&category=technology"
+
+# Same as page=2 with max=10 using offset
+curl -sS "http://127.0.0.1:5001/api/news/top-headlines?lang=en&max=10&offset=10"
+
+# Invalid offset (not a multiple of max) → 400
+curl -sS "http://127.0.0.1:5001/api/news/top-headlines?max=20&offset=5"
+
+curl -sS "http://127.0.0.1:5001/api/news/search?q=climate&lang=en"
+```
 
 ### Google Civic API note
 
