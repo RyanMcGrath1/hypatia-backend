@@ -1,13 +1,17 @@
 """Tests for GET /api/economy/summary (FRED proxy, mocked HTTP)."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
+from datetime import date
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlparse
 
+import economy
 import pytest
 import responses
+from urllib.parse import parse_qs, urlparse
 
 from app import app
 
@@ -138,3 +142,127 @@ def test_economy_summary_one_tile_invalid_json(client):
     tiles = resp.get_json()["tiles"]
     assert tiles["federal_funds_effective"]["error"] == "Invalid JSON from FRED"
     assert tiles["cpi_all_items"]["value"] == 312.0
+
+
+@responses.activate
+def test_economy_overview_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/overview")
+    assert resp.status_code == 503
+    data = resp.get_json()
+    assert data["error"] == "Missing FRED_API_KEY"
+    assert "hint" in data
+
+
+def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
+    return {
+        "observations": [
+            {"date": d, "value": v} for d, v in dates_values
+        ]
+    }
+
+
+@responses.activate
+@patch(
+    "app.build_economy_overview",
+    side_effect=lambda api_key: economy.build_economy_overview(
+        api_key, reference_date=date(2026, 5, 4)
+    ),
+)
+def test_economy_overview_all_sections_success(_mock_overview, client):
+    # Last two full quarters: 2025-Q4 through 2026-Q1
+    scenarios = {
+        "GDPC1": _overview_obs(
+            [("2025-10-01", "23000.0"), ("2026-01-01", "23100.0")]
+        ),
+        "PCE": _overview_obs(
+            [
+                ("2025-10-01", "15000.0"),
+                ("2025-11-01", "15100.0"),
+                ("2026-03-01", "15200.0"),
+            ]
+        ),
+        "UNRATE": _overview_obs(
+            [("2025-11-01", "4.1"), ("2026-03-01", "4.0")]
+        ),
+        "FEDFUNDS": _overview_obs(
+            [("2025-12-01", "4.5"), ("2026-03-01", "4.25")]
+        ),
+        "CPIAUCSL": _overview_obs(
+            [("2026-01-01", "320.0"), ("2026-03-01", "322.0")]
+        ),
+        "CSUSHPISA": _overview_obs(
+            [("2025-12-01", "320.5"), ("2026-03-01", "322.1")]
+        ),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/overview")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "as_of" in data
+    win = data["window"]
+    assert win["observation_start"] == "2025-10-01"
+    assert win["observation_end"] == "2026-03-31"
+    assert win["quarters"] == ["2025-Q4", "2026-Q1"]
+    sections = data["sections"]
+    assert set(sections) == {
+        "gdp",
+        "consumer_spending",
+        "labor",
+        "interest_rates",
+        "inflation",
+        "housing",
+    }
+    gdp = sections["gdp"]
+    assert "error" not in gdp
+    assert gdp["series_id"] == "GDPC1"
+    assert len(gdp["observations"]) == 2
+    assert gdp["observations"][0]["value"] == 23000.0
+
+
+@responses.activate
+@patch(
+    "app.build_economy_overview",
+    side_effect=lambda api_key: economy.build_economy_overview(
+        api_key, reference_date=date(2026, 5, 4)
+    ),
+)
+def test_economy_overview_one_series_http_error(_mock_overview, client):
+    scenarios = {
+        "GDPC1": _overview_obs([("2025-10-01", "1")]),
+        "PCE": _overview_obs([("2025-10-01", "1")]),
+        "UNRATE": _overview_obs([("2025-10-01", "1")]),
+        "FEDFUNDS": _overview_obs([("2025-10-01", "1")]),
+        "CPIAUCSL": _overview_obs([("2025-10-01", "1")]),
+        "CSUSHPISA": _overview_obs([("2025-10-01", "1")]),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios, http_404_series="GDPC1"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/overview")
+    assert resp.status_code == 200
+    sections = resp.get_json()["sections"]
+    assert "error" in sections["gdp"]
+    assert sections["labor"]["series_id"] == "UNRATE"
+
+
+def test_last_two_full_quarters_window():
+    from economy import last_two_full_quarters_window
+
+    w = last_two_full_quarters_window(date(2026, 5, 4))
+    assert w["observation_start"] == "2025-10-01"
+    assert w["observation_end"] == "2026-03-31"
+    assert w["quarters"] == ["2025-Q4", "2026-Q1"]
+
+    w2 = last_two_full_quarters_window(date(2026, 3, 31))
+    assert w2["quarters"] == ["2025-Q3", "2025-Q4"]

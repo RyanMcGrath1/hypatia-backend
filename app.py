@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from economy import build_economy_summary
+from economy import build_economy_overview, build_economy_summary
 from news import (
     SEARCH_PARAMS,
     build_top_headlines_envelope,
@@ -200,6 +200,17 @@ def economy_summary():
         return _missing_fred_key_response()
 
     payload = build_economy_summary(api_key)
+    return jsonify(payload), 200
+
+
+@app.get("/api/economy/overview")
+def economy_overview():
+    """FRED series for the last two full calendar quarters (see economy.py)."""
+    api_key = os.environ.get("FRED_API_KEY", "").strip()
+    if not api_key:
+        return _missing_fred_key_response()
+
+    payload = build_economy_overview(api_key)
     return jsonify(payload), 200
 
 
