@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date
 from unittest.mock import patch
 
-import economy
 import pytest
 import responses
 from urllib.parse import parse_qs, urlparse
@@ -163,36 +161,26 @@ def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
 
 
 @responses.activate
-@patch(
-    "app.build_economy_overview",
-    side_effect=lambda api_key: economy.build_economy_overview(
-        api_key, reference_date=date(2026, 5, 4)
-    ),
-)
-def test_economy_overview_all_sections_success(_mock_overview, client):
-    # Last two full quarters: 2025-Q4 through 2026-Q1
+def test_economy_overview_all_sections_success(client):
+    # FRED returns sort_order=desc: newest observation first; limit=2 caps rows.
     scenarios = {
         "GDPC1": _overview_obs(
-            [("2025-10-01", "23000.0"), ("2026-01-01", "23100.0")]
+            [("2026-01-01", "23100.0"), ("2025-10-01", "23000.0")]
         ),
         "PCE": _overview_obs(
-            [
-                ("2025-10-01", "15000.0"),
-                ("2025-11-01", "15100.0"),
-                ("2026-03-01", "15200.0"),
-            ]
+            [("2026-03-01", "15200.0"), ("2025-11-01", "15100.0")]
         ),
         "UNRATE": _overview_obs(
-            [("2025-11-01", "4.1"), ("2026-03-01", "4.0")]
+            [("2026-03-01", "4.0"), ("2025-11-01", "4.1")]
         ),
         "FEDFUNDS": _overview_obs(
-            [("2025-12-01", "4.5"), ("2026-03-01", "4.25")]
+            [("2026-03-01", "4.25"), ("2025-12-01", "4.5")]
         ),
         "CPIAUCSL": _overview_obs(
-            [("2026-01-01", "320.0"), ("2026-03-01", "322.0")]
+            [("2026-03-01", "322.0"), ("2026-01-01", "320.0")]
         ),
         "CSUSHPISA": _overview_obs(
-            [("2025-12-01", "320.5"), ("2026-03-01", "322.1")]
+            [("2026-03-01", "322.1"), ("2025-12-01", "320.5")]
         ),
     }
     responses.add_callback(
@@ -206,10 +194,7 @@ def test_economy_overview_all_sections_success(_mock_overview, client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert "as_of" in data
-    win = data["window"]
-    assert win["observation_start"] == "2025-10-01"
-    assert win["observation_end"] == "2026-03-31"
-    assert win["quarters"] == ["2025-Q4", "2026-Q1"]
+    assert "window" not in data
     sections = data["sections"]
     assert set(sections) == {
         "gdp",
@@ -223,24 +208,19 @@ def test_economy_overview_all_sections_success(_mock_overview, client):
     assert "error" not in gdp
     assert gdp["series_id"] == "GDPC1"
     assert len(gdp["observations"]) == 2
-    assert gdp["observations"][0]["value"] == 23000.0
+    assert gdp["observations"][0]["value"] == 23100.0
+    assert gdp["observations"][1]["value"] == 23000.0
 
 
 @responses.activate
-@patch(
-    "app.build_economy_overview",
-    side_effect=lambda api_key: economy.build_economy_overview(
-        api_key, reference_date=date(2026, 5, 4)
-    ),
-)
-def test_economy_overview_one_series_http_error(_mock_overview, client):
+def test_economy_overview_one_series_http_error(client):
     scenarios = {
-        "GDPC1": _overview_obs([("2025-10-01", "1")]),
-        "PCE": _overview_obs([("2025-10-01", "1")]),
-        "UNRATE": _overview_obs([("2025-10-01", "1")]),
-        "FEDFUNDS": _overview_obs([("2025-10-01", "1")]),
-        "CPIAUCSL": _overview_obs([("2025-10-01", "1")]),
-        "CSUSHPISA": _overview_obs([("2025-10-01", "1")]),
+        "GDPC1": _overview_obs([("2026-01-01", "1")]),
+        "PCE": _overview_obs([("2026-01-01", "1")]),
+        "UNRATE": _overview_obs([("2026-01-01", "1")]),
+        "FEDFUNDS": _overview_obs([("2026-01-01", "1")]),
+        "CPIAUCSL": _overview_obs([("2026-01-01", "1")]),
+        "CSUSHPISA": _overview_obs([("2026-01-01", "1")]),
     }
     responses.add_callback(
         responses.GET,
@@ -254,15 +234,3 @@ def test_economy_overview_one_series_http_error(_mock_overview, client):
     sections = resp.get_json()["sections"]
     assert "error" in sections["gdp"]
     assert sections["labor"]["series_id"] == "UNRATE"
-
-
-def test_last_two_full_quarters_window():
-    from economy import last_two_full_quarters_window
-
-    w = last_two_full_quarters_window(date(2026, 5, 4))
-    assert w["observation_start"] == "2025-10-01"
-    assert w["observation_end"] == "2026-03-31"
-    assert w["quarters"] == ["2025-Q4", "2026-Q1"]
-
-    w2 = last_two_full_quarters_window(date(2026, 3, 31))
-    assert w2["quarters"] == ["2025-Q3", "2025-Q4"]

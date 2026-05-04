@@ -5,7 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -16,6 +16,9 @@ FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 # Upstream timeout per tile (seconds); aligned with civic proxy style in app.py
 FRED_REQUEST_TIMEOUT = 30
+
+# Overview: two most recent FRED observations per series (quarterly vs monthly, etc.)
+OVERVIEW_RECENT_OBSERVATIONS = 2
 
 
 @dataclass(frozen=True)
@@ -94,58 +97,6 @@ ECONOMY_TILES: tuple[EconomyTileDef, ...] = (
         unit="percent",
     ),
 )
-
-
-def _first_day_of_quarter(year: int, quarter: int) -> date:
-    month = {1: 1, 2: 4, 3: 7, 4: 10}[quarter]
-    return date(year, month, 1)
-
-
-def _last_day_of_quarter(year: int, quarter: int) -> date:
-    if quarter == 1:
-        return date(year, 3, 31)
-    if quarter == 2:
-        return date(year, 6, 30)
-    if quarter == 3:
-        return date(year, 9, 30)
-    return date(year, 12, 31)
-
-
-def _last_completed_quarter(today: date) -> tuple[int, int]:
-    """Most recent calendar quarter whose last day is strictly before `today`."""
-    y = today.year
-    current_q = (today.month - 1) // 3 + 1
-    for q in range(current_q - 1, 0, -1):
-        if _last_day_of_quarter(y, q) < today:
-            return (y, q)
-    for q in range(4, 0, -1):
-        if _last_day_of_quarter(y - 1, q) < today:
-            return (y - 1, q)
-    raise RuntimeError("could not determine last completed quarter")
-
-
-def _quarter_before(year: int, quarter: int) -> tuple[int, int]:
-    if quarter == 1:
-        return year - 1, 4
-    return year, quarter - 1
-
-
-def last_two_full_quarters_window(ref: date) -> dict[str, Any]:
-    """Inclusive date bounds covering exactly the last two completed calendar quarters."""
-    y_new, q_new = _last_completed_quarter(ref)
-    y_old, q_old = _quarter_before(y_new, q_new)
-    start = _first_day_of_quarter(y_old, q_old)
-    end = _last_day_of_quarter(y_new, q_new)
-
-    def _qlabel(year: int, q: int) -> str:
-        return f"{year}-Q{q}"
-
-    return {
-        "observation_start": start.isoformat(),
-        "observation_end": end.isoformat(),
-        "quarters": [_qlabel(y_old, q_old), _qlabel(y_new, q_new)],
-        "label": f"{_qlabel(y_old, q_old)} – {_qlabel(y_new, q_new)}",
-    }
 
 
 def _parse_observation_value(raw: str) -> int | float | str:
@@ -275,18 +226,17 @@ def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[st
 def _fetch_overview_series(
     api_key: str,
     overview: EconomyOverviewDef,
-    observation_start: str,
-    observation_end: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Return (section_key, payload with observations or error)."""
+    """Return (section_key, payload with observations or error).
+
+    Observations are the two most recent releases per series (newest first).
+    """
     params = {
         "series_id": overview.series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "asc",
-        "observation_start": observation_start,
-        "observation_end": observation_end,
-        "limit": "100",
+        "sort_order": "desc",
+        "limit": str(OVERVIEW_RECENT_OBSERVATIONS),
     }
     try:
         resp = requests.get(
@@ -354,6 +304,8 @@ def _fetch_overview_series(
 
     out_obs: list[dict[str, Any]] = []
     for row in observations:
+        if len(out_obs) >= OVERVIEW_RECENT_OBSERVATIONS:
+            break
         if not isinstance(row, dict):
             continue
         d = str(row.get("date", "")).strip()
@@ -400,40 +352,19 @@ def build_economy_summary(api_key: str) -> dict[str, Any]:
     return {"as_of": as_of, "tiles": tiles}
 
 
-def build_economy_overview(
-    api_key: str,
-    *,
-    reference_date: date | None = None,
-) -> dict[str, Any]:
-    """FRED observations for each overview series within the last two full quarters.
-
-    `reference_date` is for tests; defaults to today's local calendar date.
-    """
-    ref = reference_date or date.today()
+def build_economy_overview(api_key: str) -> dict[str, Any]:
+    """Two most recent FRED observations per overview series (newest first in each list)."""
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    window = last_two_full_quarters_window(ref)
-    observation_start = window["observation_start"]
-    observation_end = window["observation_end"]
 
     sections: dict[str, Any] = {}
     max_workers = max(1, len(OVERVIEW_SERIES))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
-            pool.submit(
-                _fetch_overview_series,
-                api_key,
-                series,
-                observation_start,
-                observation_end,
-            )
+            pool.submit(_fetch_overview_series, api_key, series)
             for series in OVERVIEW_SERIES
         ]
         for fut in concurrent.futures.as_completed(futures):
             section_key, body = fut.result()
             sections[section_key] = body
 
-    return {
-        "as_of": as_of,
-        "window": window,
-        "sections": sections,
-    }
+    return {"as_of": as_of, "sections": sections}
