@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import requests
+
+from request_logging import log_upstream
 
 GNEWS_BASE = "https://gnews.io/api/v4"
 
@@ -67,7 +70,15 @@ def fetch_gnews(
     """GET /api/v4/{path} with server-side apikey. Returns (parsed JSON body, HTTP status)."""
     params = {**query, "apikey": api_key}
     url = f"{GNEWS_BASE}/{path.lstrip('/')}"
+    t0 = time.perf_counter()
     resp = requests.get(url, params=params, timeout=timeout)
+    log_upstream(
+        "hypatia.upstream",
+        service="gnews",
+        endpoint=path.lstrip("/"),
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
+    )
     try:
         data = resp.json()
     except ValueError:

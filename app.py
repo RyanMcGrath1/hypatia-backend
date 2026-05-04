@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import requests
@@ -13,12 +14,15 @@ from news import (
     fetch_gnews,
     filter_query_args,
 )
+from request_logging import configure_logging, log_upstream, register_request_logging
 
 # Load `.env` next to this file so the key is found even if the process cwd differs
 # (e.g. IDE run configs, Flask reloader). Restart the server after editing `.env`.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
+configure_logging(app)
+register_request_logging(app)
 
 
 def _expo_cors_origins():
@@ -68,6 +72,7 @@ CORS(
     origins=_expo_cors_origins(),
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
+    expose_headers=["X-Request-ID"],
 )
 
 GOOGLE_CIVIC_BASE = "https://www.googleapis.com/civicinfo/v2"
@@ -159,10 +164,18 @@ def civic_divisions_by_address():
         return jsonify({"error": "Query parameter 'address' is required"}), 400
 
     url = f"{GOOGLE_CIVIC_BASE}/divisionsByAddress"
+    t0 = time.perf_counter()
     resp = requests.get(
         url,
         params={"address": address, "key": api_key},
         timeout=30,
+    )
+    log_upstream(
+        "hypatia.upstream",
+        service="google_civic",
+        endpoint="divisionsByAddress",
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
     )
     try:
         data = resp.json()

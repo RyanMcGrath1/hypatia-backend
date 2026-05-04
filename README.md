@@ -44,6 +44,14 @@ Optional environment variables:
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)
 - `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
+- `LOG_LEVEL` — Python logging level (default `INFO`; use `DEBUG` for more detail)
+- `LOG_FORMAT` — `text` (default) or `json` (one JSON object per line for log aggregators)
+- `LOG_QUIET_HEALTH` — when `1` (default), skip access-style log lines for `/health` and `/hello` at INFO; set `LOG_VERBOSE_HEALTH=1` to log them
+- `LOG_VERBOSE_HEALTH` — if `1`, log health routes even when quiet health is on (overrides the skip)
+
+### Logging
+
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews** and **Google Civic** log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures log **warnings** with `tile_id` / `series_id` only.
 
 ### CORS (Expo on your PC and on a phone)
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
@@ -74,6 +77,11 @@ def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[st
             timeout=FRED_REQUEST_TIMEOUT,
         )
     except requests.Timeout:
+        logger.warning(
+            "FRED request timed out tile_id=%s series_id=%s",
+            tile.tile_id,
+            tile.series_id,
+        )
         return (
             tile.tile_id,
             {
@@ -82,6 +90,12 @@ def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[st
             },
         )
     except requests.RequestException as exc:
+        logger.warning(
+            "FRED request failed tile_id=%s series_id=%s error=%s",
+            tile.tile_id,
+            tile.series_id,
+            exc,
+        )
         return (
             tile.tile_id,
             {
