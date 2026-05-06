@@ -205,7 +205,7 @@ def economy_summary():
 
 @app.get("/api/economy/overview")
 def economy_overview():
-    """FRED: two most recent observations per overview series (see economy.py)."""
+    """FRED: three most recent observations per overview series (see economy.py)."""
     api_key = os.environ.get("FRED_API_KEY", "").strip()
     if not api_key:
         return _missing_fred_key_response()

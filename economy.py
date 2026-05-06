@@ -17,8 +17,8 @@ FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 # Upstream timeout per tile (seconds); aligned with civic proxy style in app.py
 FRED_REQUEST_TIMEOUT = 30
 
-# Overview: two most recent FRED observations per series (quarterly vs monthly, etc.)
-OVERVIEW_RECENT_OBSERVATIONS = 2
+# Overview: three most recent FRED observations per series (quarterly vs monthly, etc.)
+OVERVIEW_RECENT_OBSERVATIONS = 4
 
 
 @dataclass(frozen=True)
@@ -229,7 +229,7 @@ def _fetch_overview_series(
 ) -> tuple[str, dict[str, Any]]:
     """Return (section_key, payload with observations or error).
 
-    Observations are the two most recent releases per series (newest first).
+    Observations are the three most recent releases per series (newest first).
     """
     params = {
         "series_id": overview.series_id,
@@ -353,7 +353,7 @@ def build_economy_summary(api_key: str) -> dict[str, Any]:
 
 
 def build_economy_overview(api_key: str) -> dict[str, Any]:
-    """Two most recent FRED observations per overview series (newest first in each list)."""
+    """Three most recent FRED observations per overview series (newest first in each list)."""
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     sections: dict[str, Any] = {}

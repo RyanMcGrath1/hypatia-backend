@@ -162,25 +162,33 @@ def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
 
 @responses.activate
 def test_economy_overview_all_sections_success(client):
-    # FRED returns sort_order=desc: newest observation first; limit=2 caps rows.
+    # FRED returns sort_order=desc: newest observation first; limit=3 caps rows.
     scenarios = {
         "GDPC1": _overview_obs(
-            [("2026-01-01", "23100.0"), ("2025-10-01", "23000.0")]
+            [
+                ("2026-01-01", "23100.0"),
+                ("2025-10-01", "23000.0"),
+                ("2025-07-01", "22900.0"),
+            ]
         ),
         "PCE": _overview_obs(
-            [("2026-03-01", "15200.0"), ("2025-11-01", "15100.0")]
+            [
+                ("2026-03-01", "15200.0"),
+                ("2025-11-01", "15100.0"),
+                ("2025-08-01", "15000.0"),
+            ]
         ),
         "UNRATE": _overview_obs(
-            [("2026-03-01", "4.0"), ("2025-11-01", "4.1")]
+            [("2026-03-01", "4.0"), ("2025-11-01", "4.1"), ("2025-08-01", "4.2")]
         ),
         "FEDFUNDS": _overview_obs(
-            [("2026-03-01", "4.25"), ("2025-12-01", "4.5")]
+            [("2026-03-01", "4.25"), ("2025-12-01", "4.5"), ("2025-09-01", "4.6")]
         ),
         "CPIAUCSL": _overview_obs(
-            [("2026-03-01", "322.0"), ("2026-01-01", "320.0")]
+            [("2026-03-01", "322.0"), ("2026-01-01", "320.0"), ("2025-10-01", "318.0")]
         ),
         "CSUSHPISA": _overview_obs(
-            [("2026-03-01", "322.1"), ("2025-12-01", "320.5")]
+            [("2026-03-01", "322.1"), ("2025-12-01", "320.5"), ("2025-09-01", "319.0")]
         ),
     }
     responses.add_callback(
@@ -207,9 +215,10 @@ def test_economy_overview_all_sections_success(client):
     gdp = sections["gdp"]
     assert "error" not in gdp
     assert gdp["series_id"] == "GDPC1"
-    assert len(gdp["observations"]) == 2
+    assert len(gdp["observations"]) == 3
     assert gdp["observations"][0]["value"] == 23100.0
     assert gdp["observations"][1]["value"] == 23000.0
+    assert gdp["observations"][2]["value"] == 22900.0
 
 
 @responses.activate
