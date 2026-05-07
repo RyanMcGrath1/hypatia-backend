@@ -1,6 +1,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Optional
 
 import requests
 from dotenv import load_dotenv
@@ -76,6 +77,11 @@ CORS(
 )
 
 GOOGLE_CIVIC_BASE = "https://www.googleapis.com/civicinfo/v2"
+OPENFEC_BASE = "https://api.open.fec.gov/v1"
+# Default page size when the client omits per_page (OpenFEC names/candidates).
+OPENFEC_NAMES_PER_PAGE_DEFAULT = 5
+OPENFEC_TYPEAHEAD_TIMEOUT_S = 12
+OPENFEC_DEFAULT_TIMEOUT_S = 30
 
 
 @app.get("/")
@@ -140,6 +146,21 @@ def _missing_gnews_key_response():
     )
 
 
+def _missing_openfec_key_response():
+    return (
+        jsonify(
+            {
+                "error": "Missing OPENFEC_API_KEY",
+                "hint": (
+                    "Set OPENFEC_API_KEY in `.env` (see .env.example) or the environment, "
+                    "then fully restart this server (stop and start; required after creating/editing `.env`)."
+                ),
+            }
+        ),
+        503,
+    )
+
+
 @app.get("/api/civic/representatives")
 def civic_representatives_gone():
     """Google turned down the Representatives API in 2025; use divisions-by-address instead."""
@@ -184,6 +205,64 @@ def civic_divisions_by_address():
     return jsonify(data), resp.status_code
 
 
+def _truthy_query_flag(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in ("1", "true", "yes")
+
+
+@app.get("/api/fec/v1/names/candidates")
+@app.get("/api/fec/candidates")
+def fec_names_candidates():
+    """OpenFEC GET /v1/names/candidates (api_key from env).
+
+    Query: required ``q`` or ``name`` (alias, sent upstream as ``q``). Optional ``page``,
+    ``per_page`` (defaults to 5 when omitted).
+    Set ``typeahead=1`` for a shorter upstream timeout. Debouncing lives on the client.
+    """
+    api_key = os.environ.get("OPENFEC_API_KEY", "").strip()
+    if not api_key:
+        return _missing_openfec_key_response()
+
+    q = request.args.get("q", "").strip() or request.args.get("name", "").strip()
+    if not q:
+        return jsonify(
+            {"error": "Query parameter 'q' is required (alias: 'name')"}
+        ), 400
+
+    typeahead = _truthy_query_flag(request.args.get("typeahead"))
+
+    params: dict[str, str] = {"api_key": api_key, "q": q}
+    per_page_from_client = False
+    for key in ("page", "per_page"):
+        raw = request.args.get(key, "").strip()
+        if raw:
+            params[key] = raw
+            if key == "per_page":
+                per_page_from_client = True
+    if not per_page_from_client:
+        params["per_page"] = str(OPENFEC_NAMES_PER_PAGE_DEFAULT)
+
+    url = f"{OPENFEC_BASE}/names/candidates/"
+    timeout = (
+        OPENFEC_TYPEAHEAD_TIMEOUT_S if typeahead else OPENFEC_DEFAULT_TIMEOUT_S
+    )
+    t0 = time.perf_counter()
+    resp = requests.get(url, params=params, timeout=timeout)
+    log_upstream(
+        "hypatia.upstream",
+        service="open_fec",
+        endpoint="names/candidates",
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
+    )
+    try:
+        data = resp.json()
+    except ValueError:
+        return jsonify({"error": "Invalid response from OpenFEC API"}), 502
+    return jsonify(data), resp.status_code
+
+
 # --- Economy (FRED) ---
 # Single snapshot GET /api/economy/summary: all v1 tiles use the same FRED
 # `series/observations` upstream, so one client round-trip, one shared `as_of`,
@@ -205,7 +284,7 @@ def economy_summary():
 
 @app.get("/api/economy/overview")
 def economy_overview():
-    """FRED: three most recent observations per overview series (see economy.py)."""
+    """FRED: recent observations per overview series (see economy.py)."""
     api_key = os.environ.get("FRED_API_KEY", "").strip()
     if not api_key:
         return _missing_fred_key_response()
