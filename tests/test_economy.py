@@ -6,17 +6,10 @@ import json
 import os
 import re
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import responses
-from urllib.parse import parse_qs, urlparse
-
-from app import app
-
-
-@pytest.fixture
-def client():
-    return app.test_client()
 
 
 def _fred_payload(date1: str, val1: str, date2: str, val2: str) -> dict:
@@ -153,11 +146,7 @@ def test_economy_overview_missing_fred_key(client):
 
 
 def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
-    return {
-        "observations": [
-            {"date": d, "value": v} for d, v in dates_values
-        ]
-    }
+    return {"observations": [{"date": d, "value": v} for d, v in dates_values]}
 
 
 @responses.activate

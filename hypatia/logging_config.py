@@ -11,6 +11,8 @@ from typing import Any
 
 from flask import Flask, g, has_request_context, request
 
+from hypatia.settings import env_truthy
+
 
 class RequestContextFilter(logging.Filter):
     """Attach ``request_id`` to log records when inside a Flask request."""
@@ -79,13 +81,6 @@ class HypatiaJsonFormatter(logging.Formatter):
         return self._text_fallback.format(record)
 
 
-def _truthy(name: str, default: bool = False) -> bool:
-    v = os.environ.get(name, "").strip().lower()
-    if not v:
-        return default
-    return v in ("1", "true", "yes", "on")
-
-
 def configure_logging(app: Flask) -> None:
     """Apply LOG_LEVEL, LOG_FORMAT (``text`` | ``json``), and request context filter."""
     level_name = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
@@ -115,15 +110,15 @@ def configure_logging(app: Flask) -> None:
         root.addHandler(h)
 
     app.logger.setLevel(level)
-    # Quiet noisy third-party loggers unless DEBUG.
-    logging.getLogger("werkzeug").setLevel(logging.WARNING if level > logging.DEBUG else logging.DEBUG)
+    wk_level = logging.WARNING if level > logging.DEBUG else logging.DEBUG
+    logging.getLogger("werkzeug").setLevel(wk_level)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
 def _should_skip_access_log(path: str) -> bool:
-    if _truthy("LOG_VERBOSE_HEALTH", default=False):
+    if env_truthy("LOG_VERBOSE_HEALTH", default=False):
         return False
-    if not _truthy("LOG_QUIET_HEALTH", default=True):
+    if not env_truthy("LOG_QUIET_HEALTH", default=True):
         return False
     return path in ("/health", "/hello")
 
@@ -145,9 +140,7 @@ def register_request_logging(app: Flask) -> None:
             if _should_skip_access_log(request.path):
                 return response
             start = getattr(g, "_access_start", None)
-            duration_ms = (
-                (time.perf_counter() - start) * 1000.0 if start is not None else 0.0
-            )
+            duration_ms = (time.perf_counter() - start) * 1000.0 if start is not None else 0.0
             app.logger.info(
                 "http_request",
                 extra={
@@ -160,7 +153,6 @@ def register_request_logging(app: Flask) -> None:
                 },
             )
         except Exception:
-            # Never break responses due to logging.
             pass
         return response
 

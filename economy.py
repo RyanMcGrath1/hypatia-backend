@@ -214,9 +214,8 @@ def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[st
             prior_date = str(prior.get("date", "")).strip()
             prior_val = _parse_observation_value(prior_raw)
             out["prior_observation_date"] = prior_date
-            if (
-                isinstance(value, (int, float))
-                and isinstance(prior_val, (int, float))
+            if isinstance(value, (int, float)) and isinstance(  # noqa: UP038
+                prior_val, (int, float)
             ):
                 out["change"] = round(float(value) - float(prior_val), 6)
 
@@ -342,9 +341,7 @@ def build_economy_summary(api_key: str) -> dict[str, Any]:
 
     max_workers = max(1, len(ECONOMY_TILES))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [
-            pool.submit(_fetch_single_tile, api_key, tile) for tile in ECONOMY_TILES
-        ]
+        futures = [pool.submit(_fetch_single_tile, api_key, tile) for tile in ECONOMY_TILES]
         for fut in concurrent.futures.as_completed(futures):
             tile_id, body = fut.result()
             tiles[tile_id] = body
@@ -360,8 +357,7 @@ def build_economy_overview(api_key: str) -> dict[str, Any]:
     max_workers = max(1, len(OVERVIEW_SERIES))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
-            pool.submit(_fetch_overview_series, api_key, series)
-            for series in OVERVIEW_SERIES
+            pool.submit(_fetch_overview_series, api_key, series) for series in OVERVIEW_SERIES
         ]
         for fut in concurrent.futures.as_completed(futures):
             section_key, body = fut.result()

@@ -1,6 +1,20 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary, GNews proxy for headlines and search, and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary and overview, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
+
+## Project layout
+
+| Path | Role |
+|------|------|
+| [app.py](app.py) | Dev entrypoint: `create_app()` + `python app.py` (re-exports `app` for `flask --app app`). |
+| [wsgi.py](wsgi.py) | WSGI entry: `application = create_app()` for Gunicorn (`wsgi:application` or alias `wsgi:app`). |
+| [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)), [settings](hypatia/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/cors.py), [logging](hypatia/logging_config.py), [HTTP helpers](hypatia/http.py), [JSON error handlers](hypatia/error_handlers.py). |
+| [hypatia/routes/](hypatia/routes/__init__.py) | Flask blueprints (health, civic, FEC, economy, news). |
+| [economy.py](economy.py), [news.py](news.py) | FRED and GNews client logic (root modules; imported by blueprints). |
+| [pyproject.toml](pyproject.toml) | Project metadata (`requires-python`), Ruff, pytest. |
+| [Dockerfile](Dockerfile) | Minimal production-shaped image (Gunicorn + `HYPATIA_ENV=production`). |
+
+Tests use `create_app("testing")` via [tests/conftest.py](tests/conftest.py); CI runs Ruff and pytest on Python 3.10 and 3.12 ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Requirements
 
@@ -30,28 +44,31 @@ Optional dev / test tools:
 pip install -r requirements-dev.txt
 ```
 
-Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRED_API_KEY` (economy routes), and `GNEWS_API_KEY` (news routes) as needed. Never commit `.env`.
+Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRED_API_KEY` (economy routes), `GNEWS_API_KEY` (news routes), and `OPENFEC_API_KEY` (FEC routes) as needed. Never commit `.env`.
 
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for `GET /api/economy/summary`
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for `GET /api/economy/summary` and `GET /api/economy/overview`
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
+- `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/v1/names/candidates` and the alias `GET /api/fec/candidates`
 
 Optional environment variables:
 
+- `HYPATIA_ENV` or `FLASK_ENV` — `development` (default), `production`, or `testing` (pytest uses `testing` via the app factory; not usually set by hand)
+- `SECRET_KEY` — set in production for signed cookies and similar; a dev-only default is used if unset (see [hypatia/settings.py](hypatia/settings.py))
 - `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)
-- `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, or `yes` to enable Flask’s debug mode and reloader when running `python app.py` (default is off)
+- `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, `yes`, or `on` so **`DevelopmentConfig`** sets `DEBUG` (used by `python app.py` and `app.config`; default is off)
 - `LOG_LEVEL` — Python logging level (default `INFO`; use `DEBUG` for more detail)
 - `LOG_FORMAT` — `text` (default) or `json` (one JSON object per line for log aggregators)
-- `LOG_QUIET_HEALTH` — when `1` (default), skip access-style log lines for `/health` and `/hello` at INFO; set `LOG_VERBOSE_HEALTH=1` to log them
-- `LOG_VERBOSE_HEALTH` — if `1`, log health routes even when quiet health is on (overrides the skip)
+- `LOG_QUIET_HEALTH` — when truthy (default `1`), skip access-style log lines for `/health` and `/hello` at INFO; set `LOG_VERBOSE_HEALTH` to log them
+- `LOG_VERBOSE_HEALTH` — if truthy, log health routes even when quiet health is on (overrides the skip). Truthy values: `1`, `true`, `yes`, `on`
 
 ### Logging
 
-Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews** and **Google Civic** log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures log **warnings** with `tile_id` / `series_id` only.
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, and **OpenFEC** log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures log **warnings** with `tile_id` / `series_id` only.
 
 ### CORS (Expo on your PC and on a phone)
 
@@ -59,7 +76,7 @@ The API listens on `0.0.0.0`, so on your phone use your computer’s **LAN IP** 
 
 ## Run locally
 
-Development (binds `0.0.0.0` so LAN devices can reach the server). Enable the debugger with `FLASK_DEBUG=1` (PowerShell: `$env:FLASK_DEBUG='1'; python app.py`):
+Development uses **`HYPATIA_ENV` / `FLASK_ENV`** default `development`. The server binds `0.0.0.0` so LAN devices can reach it. Enable the debugger with `FLASK_DEBUG=1` (PowerShell: `$env:FLASK_DEBUG='1'; python app.py`); that matches `app.config["DEBUG"]` used by `app.run(...)`.
 
 ```bash
 python app.py
@@ -67,10 +84,12 @@ python app.py
 
 With no `PORT` in `.env`, the server listens on **5001** (see optional env vars above). Use `source .venv/bin/activate` before `python app.py` if `python` is not on your PATH.
 
-Run tests:
+Run tests and lint (install [requirements-dev.txt](requirements-dev.txt) first):
 
 ```bash
 pytest
+ruff check .
+ruff format --check .
 ```
 
 Or with the Flask CLI:
@@ -81,11 +100,13 @@ flask --app app run --host 0.0.0.0 --port 5001
 
 ## Production (WSGI)
 
-Use [wsgi.py](wsgi.py) with Gunicorn:
+Use [wsgi.py](wsgi.py) with Gunicorn (set `HYPATIA_ENV=production` or `FLASK_ENV=production` and a strong `SECRET_KEY`):
 
 ```bash
-gunicorn -w 2 -b 0.0.0.0:5001 wsgi:app
+gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 ```
+
+(`wsgi:app` is an alias of the same object.) A minimal container build is in [Dockerfile](Dockerfile); inject API keys and `SECRET_KEY` at runtime, not into the image.
 
 ## Routes
 
@@ -97,10 +118,15 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:app
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
 | GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
+| GET | `/api/economy/overview` | Recent FRED observations per overview series; JSON has `as_of` and `sections` (see [Economy overview](#economy-overview-apieconomyoverview)) |
+| GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
+| GET | `/api/fec/candidates?...` | Same as `/api/fec/v1/names/candidates` (backward-compatible alias) |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
 | GET | `/api/news/search` | Proxies [GNews search](https://docs.gnews.io/endpoints/search-endpoint); requires `q`; see [News routes](#news-routes) |
 
-If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` next to `app.py`, then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset.
+If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` at the **repository root** (same directory as `app.py`), then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset. OpenFEC routes return **503** with `Missing OPENFEC_API_KEY` when `OPENFEC_API_KEY` is unset.
+
+Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
 ### Economy summary (`/api/economy/summary`)
 
@@ -118,6 +144,38 @@ curl -sS "http://127.0.0.1:5001/api/economy/summary"
 ```
 
 (PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)
+
+### Economy overview (`/api/economy/overview`)
+
+Returns **HTTP 200** with:
+
+- `as_of`: ISO-8601 UTC timestamp when the snapshot was built.
+- `sections`: object keyed by section; each value holds recent FRED observations for that overview series (newest first within each section).
+
+Uses the same `FRED_API_KEY` as `/api/economy/summary`. If the key is missing, the route returns **503** with `Missing FRED_API_KEY`.
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/overview"
+```
+
+### OpenFEC candidate names (`/api/fec/v1/names/candidates` and `/api/fec/candidates`)
+
+Proxies OpenFEC **GET** [`/v1/names/candidates/`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates). The server sends **`api_key`** from `OPENFEC_API_KEY` only (never from the client).
+
+Query parameters:
+
+- **`q`** or **`name`** (alias): search string (required).
+- **`page`**, **`per_page`**: forwarded when present; if **`per_page`** is omitted, the server defaults it to **5**.
+- **`typeahead`**: when `1`, `true`, or `yes`, uses a shorter upstream timeout for responsive typeahead (debouncing belongs on the client).
+
+Examples (port **5001**):
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/fec/candidates?q=smith"
+curl -sS "http://127.0.0.1:5001/api/fec/v1/names/candidates?name=jane%20doe&typeahead=1"
+```
 
 ### News routes
 

@@ -6,15 +6,7 @@ import re
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
-import pytest
 import responses
-
-from app import app
-
-
-@pytest.fixture
-def client():
-    return app.test_client()
 
 
 @responses.activate
@@ -65,7 +57,12 @@ def test_news_top_headlines_forwards_filters_clamps_max_ignores_cache_buster(cli
     responses.add(
         responses.GET,
         re.compile(r"https://gnews\.io/api/v4/top-headlines\?"),
-        json={"articles": [{"title": "x", "publishedAt": "2024-01-02T00:00:00Z"}], "totalArticles": 1},
+        json={
+            "articles": [
+                {"title": "x", "publishedAt": "2024-01-02T00:00:00Z"},
+            ],
+            "totalArticles": 1,
+        },
         status=200,
     )
     with patch.dict(os.environ, {"GNEWS_API_KEY": "secret"}):
@@ -88,10 +85,16 @@ def test_news_top_headlines_second_page_has_more(client):
         qs = parse_qs(urlparse(request.url).query)
         page = (qs.get("page") or ["1"])[0]
         if page == "1":
-            arts = [{"title": f"a{i}", "publishedAt": f"2024-01-{10+i:02d}T12:00:00Z"} for i in range(10)]
+            arts = [
+                {"title": f"a{i}", "publishedAt": f"2024-01-{10 + i:02d}T12:00:00Z"}
+                for i in range(10)
+            ]
             return (200, {}, json.dumps({"articles": arts, "totalArticles": 25}))
         if page == "2":
-            arts = [{"title": f"b{i}", "publishedAt": f"2024-01-{20+i:02d}T12:00:00Z"} for i in range(10)]
+            arts = [
+                {"title": f"b{i}", "publishedAt": f"2024-01-{20 + i:02d}T12:00:00Z"}
+                for i in range(10)
+            ]
             return (200, {}, json.dumps({"articles": arts, "totalArticles": 25}))
         return (200, {}, json.dumps({"articles": [], "totalArticles": 25}))
 

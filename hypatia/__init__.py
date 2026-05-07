@@ -1,0 +1,44 @@
+"""Hypatia Flask application factory and package root.
+
+Blueprints live under ``hypatia.routes``. FRED/GNews client modules remain at the
+repository root (``economy.py``, ``news.py``) to limit churn; they can move under
+this package when you split services or add more shared libraries.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask
+
+from hypatia.cors import init_cors
+from hypatia.error_handlers import register_error_handlers
+from hypatia.logging_config import configure_logging, register_request_logging
+from hypatia.routes import register_blueprints
+from hypatia.settings import get_config_class
+
+# Project root (parent of the ``hypatia`` package).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def create_app(config_name: str | None = None) -> Flask:
+    """Build and configure the Flask app.
+
+    :param config_name: ``development``, ``production``, or ``testing``. When omitted,
+        uses ``HYPATIA_ENV``, then ``FLASK_ENV``, then ``development``.
+    """
+    cfg_class = get_config_class(config_name)
+
+    if not getattr(cfg_class, "TESTING", False):
+        load_dotenv(_PROJECT_ROOT / ".env")
+
+    app = Flask(__name__)
+    app.config.from_object(cfg_class)
+
+    configure_logging(app)
+    register_request_logging(app)
+    register_error_handlers(app)
+    init_cors(app)
+    register_blueprints(app)
+    return app

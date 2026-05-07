@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from request_logging import log_upstream
+from hypatia.logging_config import log_upstream
 
 GNEWS_BASE = "https://gnews.io/api/v4"
 
@@ -153,9 +153,7 @@ def parse_top_headlines_pagination(args) -> tuple[int, int, str | None]:
     has_offset = offset_raw is not None and str(offset_raw).strip() != ""
 
     if has_page and has_offset:
-        page, err = _parse_positive_int(
-            "page", page_raw, default=None, minimum=1, maximum=10**9
-        )
+        page, err = _parse_positive_int("page", page_raw, default=None, minimum=1, maximum=10**9)
         if err:
             return 0, 0, err
         try:
@@ -166,11 +164,11 @@ def parse_top_headlines_pagination(args) -> tuple[int, int, str | None]:
             return 0, 0, "Query parameter 'offset' must be >= 0"
         expected = (page - 1) * max_size
         if offset != expected:
-            return (
-                0,
-                0,
-                f"Query parameters 'page' and 'offset' disagree: for page={page} and max={max_size}, offset must be {expected}",
+            msg = (
+                f"Query parameters 'page' and 'offset' disagree: "
+                f"for page={page} and max={max_size}, offset must be {expected}"
             )
+            return (0, 0, msg)
         return page, max_size, None
 
     if has_offset:
@@ -181,18 +179,16 @@ def parse_top_headlines_pagination(args) -> tuple[int, int, str | None]:
         if offset < 0:
             return 0, 0, "Query parameter 'offset' must be >= 0"
         if offset % max_size != 0:
-            return (
-                0,
-                0,
-                f"Query parameter 'offset' must be a multiple of max ({max_size}) when 'page' is omitted",
+            msg = (
+                f"Query parameter 'offset' must be a multiple of max ({max_size}) "
+                "when 'page' is omitted"
             )
+            return (0, 0, msg)
         page = offset // max_size + 1
         return page, max_size, None
 
     if has_page:
-        page, err = _parse_positive_int(
-            "page", page_raw, default=None, minimum=1, maximum=10**9
-        )
+        page, err = _parse_positive_int("page", page_raw, default=None, minimum=1, maximum=10**9)
         if err:
             return 0, 0, err
         return page, max_size, None

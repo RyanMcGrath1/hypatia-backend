@@ -5,15 +5,7 @@ import re
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
-import pytest
 import responses
-
-from app import app
-
-
-@pytest.fixture
-def client():
-    return app.test_client()
 
 
 @responses.activate
@@ -89,9 +81,7 @@ def test_fec_typeahead_respects_explicit_per_page(client):
         status=200,
     )
     with patch.dict(os.environ, {"OPENFEC_API_KEY": "secret"}):
-        r = client.get(
-            "/api/fec/v1/names/candidates?q=x&typeahead=true&per_page=25"
-        )
+        r = client.get("/api/fec/v1/names/candidates?q=x&typeahead=true&per_page=25")
     assert r.status_code == 200
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["per_page"] == ["25"]
