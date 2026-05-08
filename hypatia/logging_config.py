@@ -5,13 +5,25 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from typing import Any
 
+import colorlog
 from flask import Flask, g, has_request_context, request
 
 from hypatia.settings import env_truthy
+
+
+def _log_color_enabled() -> bool:
+    """Color text logs when stderr is a TTY unless ``LOG_COLOR`` overrides."""
+    raw = os.environ.get("LOG_COLOR", "auto").strip().lower()
+    if raw in ("never", "no", "0", "false"):
+        return False
+    if raw in ("always", "yes", "1", "true", "force"):
+        return True
+    return sys.stderr.isatty()
 
 
 class RequestContextFilter(logging.Filter):
@@ -93,10 +105,34 @@ def configure_logging(app: Flask) -> None:
             datefmt=datefmt
         )
     else:
-        datefmt = None
-        handler_fmt = logging.Formatter(
-            "%(asctime)s %(levelname)s [%(name)s] [req_id=%(request_id)s] %(message)s"
-        )
+        datefmt = "%Y-%m-%d %H:%M:%S"
+        if _log_color_enabled():
+            levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+            cyan_by_level = dict.fromkeys(levels, "cyan")
+            blue_by_level = dict.fromkeys(levels, "blue")
+            purple_by_level = dict.fromkeys(levels, "purple")
+            handler_fmt = colorlog.ColoredFormatter(
+                "%(log_color)s%(levelname)-8s%(reset)s %(cyan)s%(asctime)s%(reset)s "
+                "[%(blue)s%(name)s%(reset)s] [req=%(purple)s%(request_id)s%(reset)s] %(message)s",
+                datefmt=datefmt,
+                log_colors={
+                    "DEBUG": "cyan",
+                    "INFO": "green",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
+                    "CRITICAL": "bold_red",
+                },
+                secondary_log_colors={
+                    "asctime": cyan_by_level,
+                    "name": blue_by_level,
+                    "request_id": purple_by_level,
+                },
+            )
+        else:
+            handler_fmt = logging.Formatter(
+                "%(asctime)s %(levelname)s [%(name)s] [req_id=%(request_id)s] %(message)s",
+                datefmt=datefmt,
+            )
 
     root = logging.getLogger()
     root.setLevel(level)

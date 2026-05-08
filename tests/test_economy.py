@@ -232,3 +232,108 @@ def test_economy_overview_one_series_http_error(client):
     sections = resp.get_json()["sections"]
     assert "error" in sections["gdp"]
     assert sections["labor"]["series_id"] == "UNRATE"
+
+
+@responses.activate
+def test_fred_observations_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get(
+            "/api/economy/fred/observations?series_id=PAYEMS&observation_start=2020-01-01"
+        )
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+def test_fred_observations_missing_series_id(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "secret"}):
+        resp = client.get("/api/economy/fred/observations?observation_start=2020-01-01")
+    assert resp.status_code == 400
+    assert "series_id" in resp.get_json()["error"]
+
+
+@responses.activate
+def test_fred_observations_optional_observation_start_forwards_desc(client):
+    responses.add(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations\?"),
+        json={"observations": [{"date": "2024-06-01", "value": "2"}], "count": 1},
+        status=200,
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "myfredkey"}):
+        resp = client.get(
+            "/api/economy/fred/observations?series_id=PAYEMS&limit=72&sort_order=desc"
+        )
+    assert resp.status_code == 200
+    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert "observation_start" not in qs
+    assert qs["sort_order"] == ["desc"]
+    assert qs["limit"] == ["72"]
+
+
+def test_fred_observations_invalid_limit(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "secret"}):
+        resp = client.get(
+            "/api/economy/fred/observations?series_id=PAYEMS&observation_start=2020-01-01"
+            "&limit=notint"
+        )
+    assert resp.status_code == 400
+
+
+@responses.activate
+def test_fred_observations_forwards_params_and_returns_upstream_body(client):
+    responses.add(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations\?"),
+        json={"observations": [{"date": "2020-01-01", "value": "1"}], "count": 1},
+        status=200,
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "myfredkey"}):
+        resp = client.get(
+            "/api/economy/fred/observations?series_id=PAYEMS&observation_start=2020-01-01"
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["count"] == 1
+    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert qs["api_key"] == ["myfredkey"]
+    assert qs["file_type"] == ["json"]
+    assert qs["series_id"] == ["PAYEMS"]
+    assert qs["observation_start"] == ["2020-01-01"]
+    assert qs["limit"] == ["60"]
+
+
+@responses.activate
+def test_fred_observations_invalid_upstream_json(client):
+    responses.add(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations\?"),
+        body="{not json",
+        status=200,
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get(
+            "/api/economy/fred/observations?series_id=PAYEMS&observation_start=2020-01-01"
+        )
+    assert resp.status_code == 502
+    assert resp.get_json()["error"] == "Invalid response from FRED API"
+
+
+@responses.activate
+def test_payems_delta_series_forwards_units_and_sort_order(client):
+    responses.add(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations\?"),
+        json={"observations": [{"date": "2026-03-01", "value": "178"}], "count": 1},
+        status=200,
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "myfredkey"}):
+        resp = client.get(
+            "/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
+        )
+    assert resp.status_code == 200
+    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert qs["api_key"] == ["myfredkey"]
+    assert qs["file_type"] == ["json"]
+    assert qs["series_id"] == ["PAYEMS"]
+    assert qs["units"] == ["chg"]
+    assert qs["sort_order"] == ["desc"]
+    assert qs["limit"] == ["72"]

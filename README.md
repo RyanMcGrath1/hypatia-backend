@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRE
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for `GET /api/economy/summary` and `GET /api/economy/overview`
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/summary`, `GET /api/economy/overview`, `GET /api/economy/fred/observations`)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/v1/names/candidates` and the alias `GET /api/fec/candidates`
 
@@ -62,13 +62,18 @@ Optional environment variables:
 - `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)
 - `FLASK_DEBUG` or `DEBUG` — set to `1`, `true`, `yes`, or `on` so **`DevelopmentConfig`** sets `DEBUG` (used by `python app.py` and `app.config`; default is off)
 - `LOG_LEVEL` — Python logging level (default `INFO`; use `DEBUG` for more detail)
-- `LOG_FORMAT` — `text` (default) or `json` (one JSON object per line for log aggregators)
+- `LOG_FORMAT` — `text` (default) or `json` (one JSON object per line for log aggregators; **no ANSI colors**)
+- `LOG_COLOR` — `auto` (default): color **text** logs when stderr is a TTY; `always` / `never` to force on or off (use `never` when piping logs to a file)
 - `LOG_QUIET_HEALTH` — when truthy (default `1`), skip access-style log lines for `/health` and `/hello` at INFO; set `LOG_VERBOSE_HEALTH` to log them
 - `LOG_VERBOSE_HEALTH` — if truthy, log health routes even when quiet health is on (overrides the skip). Truthy values: `1`, `true`, `yes`, `on`
 
 ### Logging
 
-Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, and **OpenFEC** log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures log **warnings** with `tile_id` / `series_id` only.
+Hypatia’s **text** logs use colors by default on interactive terminals (level, timestamp, logger name, request id). JSON logs stay plain for parsers. Control with **`LOG_COLOR`** (`auto` | `always` | `never`).
+
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures inside the summary/overview builders still log **warnings** with `tile_id` / `series_id` only.
+
+Flask’s **Werkzeug** dev-server lines (e.g. `127.0.0.1 - - [date] "GET /..."`) keep their default styling; Hypatia’s application log lines are what `LOG_LEVEL` / `LOG_FORMAT` control.
 
 ### CORS (Expo on your PC and on a phone)
 
@@ -91,6 +96,8 @@ pytest
 ruff check .
 ruff format --check .
 ```
+
+Pytest uses colors when the terminal supports them; set [`FORCE_COLOR=1`](https://docs.pytest.org/en/stable/how-to/output.html) if you want colors in environments without a TTY (some CI logs).
 
 Or with the Flask CLI:
 
@@ -119,12 +126,14 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
 | GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
 | GET | `/api/economy/overview` | Recent FRED observations per overview series; JSON has `as_of` and `sections` (see [Economy overview](#economy-overview-apieconomyoverview)) |
+| GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
+| GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `sort_order`, `limit` |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
 | GET | `/api/fec/candidates?...` | Same as `/api/fec/v1/names/candidates` (backward-compatible alias) |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
 | GET | `/api/news/search` | Proxies [GNews search](https://docs.gnews.io/endpoints/search-endpoint); requires `q`; see [News routes](#news-routes) |
 
-If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` at the **repository root** (same directory as `app.py`), then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset. OpenFEC routes return **503** with `Missing OPENFEC_API_KEY` when `OPENFEC_API_KEY` is unset.
+If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` at the **repository root** (same directory as `app.py`), then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). Economy routes that need FRED return **503** with `Missing FRED_API_KEY` when `FRED_API_KEY` is unset. News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset. OpenFEC routes return **503** with `Missing OPENFEC_API_KEY` when `OPENFEC_API_KEY` is unset.
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
@@ -158,6 +167,32 @@ Example:
 
 ```bash
 curl -sS "http://127.0.0.1:5001/api/economy/overview"
+```
+
+### FRED series observations (`/api/economy/fred/observations`)
+
+Thin proxy for [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html). The server supplies **`api_key`** from **`FRED_API_KEY`** and **`file_type=json`**. **`series_id`** is required. **`observation_start`** is optional (omit it and use **`sort_order=desc`** with **`limit`** to pull the most recent points). Optional **`limit`** defaults to **60** and is capped at **10000**. Additional whitelisted parameters (e.g. `observation_end`, `sort_order`, `offset`) are forwarded when present.
+
+Example (port **5001**, latest `PAYEMS` prints):
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/fred/observations?series_id=PAYEMS&limit=72&sort_order=desc"
+```
+
+With an explicit window:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/fred/observations?series_id=PAYEMS&observation_start=2020-01-01&limit=60"
+```
+
+### PAYEMS monthly deltas (`/api/economy/fred/series/PAYEMS/delta`)
+
+Returns PAYEMS month-over-month deltas directly from FRED (`units=chg`) so clients do not need to subtract levels manually. The server still injects `api_key` and `file_type=json`. Optional query params include `observation_start`, `limit`, and `sort_order`.
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
 ```
 
 ### OpenFEC candidate names (`/api/fec/v1/names/candidates` and `/api/fec/candidates`)
