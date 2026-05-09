@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import requests
@@ -19,6 +20,8 @@ from hypatia.logging_config import log_upstream
 from hypatia.settings import Config
 
 bp = Blueprint("economy", __name__)
+
+_OVERVIEW_OBSERVATION_END_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Whitelisted query keys forwarded to FRED ``series/observations`` (``api_key`` from env only).
 _FRED_OBSERVATIONS_FORWARD_PARAMS = frozenset(
@@ -60,7 +63,23 @@ def economy_overview():
     if not api_key:
         return missing_env_key_response(Config.ENV_FRED)
 
-    return jsonify(build_economy_overview(api_key)), 200
+    observation_end = (request.args.get("observation_end") or "").strip()
+    if observation_end and _OVERVIEW_OBSERVATION_END_RE.fullmatch(observation_end) is None:
+        return (
+            jsonify(
+                {
+                    "error": "Invalid observation_end",
+                    "hint": "Use YYYY-MM-DD (e.g. 2025-11-01)",
+                }
+            ),
+            400,
+        )
+
+    payload = build_economy_overview(
+        api_key,
+        observation_end=observation_end or None,
+    )
+    return jsonify(payload), 200
 
 
 @bp.get("/api/economy/fred/observations")

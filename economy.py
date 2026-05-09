@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import requests
@@ -19,6 +20,12 @@ FRED_REQUEST_TIMEOUT = 30
 
 # Overview: ten most recent FRED observations per series (quarterly vs monthly, etc.)
 OVERVIEW_RECENT_OBSERVATIONS = 10
+
+# CPI overview needs extra history for YoY on each displayed month. Buffer beyond
+# (display + 12) absorbs duplicate observation dates (revisions) so calendar lookups
+# still resolve t-1 / t-12 months.
+OVERVIEW_INFLATION_SECTION_KEY = "inflation"
+OVERVIEW_INFLATION_FRED_LIMIT = OVERVIEW_RECENT_OBSERVATIONS + 12 + 26
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,158 @@ def _parse_observation_value(raw: str) -> int | float | str:
         return int(s)
     except ValueError:
         return s
+
+
+def _cpi_numeric_level(value: Any) -> float | None:
+    if isinstance(value, (int, float)):  # noqa: UP038
+        return float(value)
+    return None
+
+
+def _inflation_pct_change(current: float, base: float) -> float | None:
+    if base == 0:
+        return None
+    return round((current - base) / base * 100, 2)
+
+
+def _fred_observation_calendar_date(raw: str) -> date | None:
+    """Parse FRED observation_date (typically YYYY-MM-DD)."""
+    s = raw.strip()
+    if len(s) < 10:
+        return None
+    try:
+        y = int(s[0:4])
+        m = int(s[5:7])
+        d = int(s[8:10])
+        return date(y, m, d)
+    except ValueError:
+        return None
+
+
+def _cpi_month_key(raw_date: str) -> date | None:
+    """First-of-month key so CPI periods align even if FRED uses varying month days."""
+    d = _fred_observation_calendar_date(raw_date)
+    if d is None:
+        return None
+    return date(d.year, d.month, 1)
+
+
+def _calendar_month_add(month_start: date, delta_months: int) -> date:
+    idx = month_start.year * 12 + (month_start.month - 1) + delta_months
+    y, m0 = divmod(idx, 12)
+    return date(y, m0 + 1, 1)
+
+
+def _cpi_levels_by_month(parsed_desc_newest_first: list[dict[str, Any]]) -> dict[date, float]:
+    """Map calendar month → level; first row wins (newest realtime when sorted desc)."""
+    out: dict[date, float] = {}
+    for o in parsed_desc_newest_first:
+        mk = _cpi_month_key(str(o.get("date", "")))
+        if mk is None:
+            continue
+        lvl = _cpi_numeric_level(o.get("value"))
+        if lvl is None:
+            continue
+        out.setdefault(mk, lvl)
+    return out
+
+
+def _inflation_mom_for_month(levels: dict[date, float], month_key: date) -> float | None:
+    prior_m = _calendar_month_add(month_key, -1)
+    cur, prev = levels.get(month_key), levels.get(prior_m)
+    if cur is None or prev is None:
+        return None
+    return _inflation_pct_change(cur, prev)
+
+
+def _inflation_yoy_for_month(levels: dict[date, float], month_key: date) -> float | None:
+    yago_m = _calendar_month_add(month_key, -12)
+    cur, prior_y = levels.get(month_key), levels.get(yago_m)
+    if cur is None or prior_y is None:
+        return None
+    return _inflation_pct_change(cur, prior_y)
+
+
+def _row_index_for_cpi_month(
+    parsed_desc_newest_first: list[dict[str, Any]],
+    month_key: date,
+) -> int | None:
+    """First list index for month_key (newest realtime wins when sorted desc)."""
+    for i, o in enumerate(parsed_desc_newest_first):
+        mk = _cpi_month_key(str(o.get("date", "")))
+        if mk == month_key:
+            return i
+    return None
+
+
+def _inflation_mom_adjacent_rows(
+    parsed_desc_newest_first: list[dict[str, Any]],
+    row_index: int,
+) -> float | None:
+    """MoM using this row vs next older row with a usable numeric level (skips ``.`` gaps)."""
+    if row_index >= len(parsed_desc_newest_first):
+        return None
+    cur = _cpi_numeric_level(parsed_desc_newest_first[row_index].get("value"))
+    if cur is None:
+        return None
+    j = row_index + 1
+    while j < len(parsed_desc_newest_first):
+        prev = _cpi_numeric_level(parsed_desc_newest_first[j].get("value"))
+        if prev is not None:
+            return _inflation_pct_change(cur, prev)
+        j += 1
+    return None
+
+
+def _inflation_mom_for_acceleration(
+    levels: dict[date, float],
+    parsed_desc_newest_first: list[dict[str, Any]],
+    month_key: date,
+) -> float | None:
+    """Prefer calendar MoM; else adjacent-row MoM (needs newer → older numeric levels)."""
+    cal = _inflation_mom_for_month(levels, month_key)
+    if cal is not None:
+        return cal
+    idx = _row_index_for_cpi_month(parsed_desc_newest_first, month_key)
+    if idx is None:
+        return None
+    return _inflation_mom_adjacent_rows(parsed_desc_newest_first, idx)
+
+
+def _inflation_acceleration(mom_current: float | None, mom_prior_month: float | None) -> str | None:
+    if mom_current is None or mom_prior_month is None:
+        return None
+    if math.isclose(mom_current, mom_prior_month, rel_tol=0.0, abs_tol=5e-3):
+        return "flat"
+    if mom_current > mom_prior_month:
+        return "accelerating"
+    return "decelerating"
+
+
+def _attach_inflation_derived_fields(
+    observations_display: list[dict[str, Any]],
+    parsed_desc_newest_first: list[dict[str, Any]],
+) -> None:
+    """Add momInflation, yoyInflation (calendar), acceleration (calendar MoM with row fallback)."""
+    levels = _cpi_levels_by_month(parsed_desc_newest_first)
+
+    for obs in observations_display:
+        mk = _cpi_month_key(str(obs.get("date", "")))
+        if mk is None:
+            obs["momInflation"] = None
+            obs["yoyInflation"] = None
+            obs["acceleration"] = None
+            continue
+
+        mom_i = _inflation_mom_for_month(levels, mk)
+        yoy_i = _inflation_yoy_for_month(levels, mk)
+        prior_m = _calendar_month_add(mk, -1)
+        mom_accel = _inflation_mom_for_acceleration(levels, parsed_desc_newest_first, mk)
+        mom_accel_prior = _inflation_mom_for_acceleration(levels, parsed_desc_newest_first, prior_m)
+
+        obs["momInflation"] = mom_i
+        obs["yoyInflation"] = yoy_i
+        obs["acceleration"] = _inflation_acceleration(mom_accel, mom_accel_prior)
 
 
 def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[str, Any]]:
@@ -225,18 +384,27 @@ def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[st
 def _fetch_overview_series(
     api_key: str,
     overview: EconomyOverviewDef,
+    *,
+    observation_end: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (section_key, payload with observations or error).
 
     Observations are the most recent releases per series (newest first).
     """
-    params = {
+    fetch_limit = (
+        OVERVIEW_INFLATION_FRED_LIMIT
+        if overview.section_key == OVERVIEW_INFLATION_SECTION_KEY
+        else OVERVIEW_RECENT_OBSERVATIONS
+    )
+    params: dict[str, str] = {
         "series_id": overview.series_id,
         "api_key": api_key,
         "file_type": "json",
         "sort_order": "desc",
-        "limit": str(OVERVIEW_RECENT_OBSERVATIONS),
+        "limit": str(fetch_limit),
     }
+    if observation_end:
+        params["observation_end"] = observation_end
     try:
         resp = requests.get(
             FRED_OBSERVATIONS_URL,
@@ -301,20 +469,22 @@ def _fetch_overview_series(
             },
         )
 
-    out_obs: list[dict[str, Any]] = []
+    parsed_all: list[dict[str, Any]] = []
     for row in observations:
-        if len(out_obs) >= OVERVIEW_RECENT_OBSERVATIONS:
+        if len(parsed_all) >= fetch_limit:
             break
         if not isinstance(row, dict):
             continue
         d = str(row.get("date", "")).strip()
         raw_v = str(row.get("value", "")).strip()
-        out_obs.append(
+        parsed_all.append(
             {
                 "date": d,
                 "value": _parse_observation_value(raw_v),
             }
         )
+
+    out_obs = parsed_all[:OVERVIEW_RECENT_OBSERVATIONS]
 
     if not out_obs:
         return (
@@ -331,6 +501,13 @@ def _fetch_overview_series(
         "unit": overview.unit,
         "observations": out_obs,
     }
+    if overview.section_key == OVERVIEW_INFLATION_SECTION_KEY:
+        _attach_inflation_derived_fields(out_obs, parsed_all)
+        head = out_obs[0]
+        body["momInflation"] = head.get("momInflation")
+        body["yoyInflation"] = head.get("yoyInflation")
+        body["acceleration"] = head.get("acceleration")
+
     return overview.section_key, body
 
 
@@ -349,18 +526,35 @@ def build_economy_summary(api_key: str) -> dict[str, Any]:
     return {"as_of": as_of, "tiles": tiles}
 
 
-def build_economy_overview(api_key: str) -> dict[str, Any]:
-    """Recent FRED observations per overview series (newest first in each list)."""
+def build_economy_overview(
+    api_key: str,
+    *,
+    observation_end: str | None = None,
+) -> dict[str, Any]:
+    """Recent FRED observations per overview series (newest first in each list).
+
+    ``observation_end`` (YYYY-MM-DD) is forwarded to FRED so all sections share the same
+    vintage window—useful to reproduce CPI enrichment against a known report month.
+    """
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     sections: dict[str, Any] = {}
     max_workers = max(1, len(OVERVIEW_SERIES))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
-            pool.submit(_fetch_overview_series, api_key, series) for series in OVERVIEW_SERIES
+            pool.submit(
+                _fetch_overview_series,
+                api_key,
+                series,
+                observation_end=observation_end,
+            )
+            for series in OVERVIEW_SERIES
         ]
         for fut in concurrent.futures.as_completed(futures):
             section_key, body = fut.result()
             sections[section_key] = body
 
-    return {"as_of": as_of, "sections": sections}
+    out: dict[str, Any] = {"as_of": as_of, "sections": sections}
+    if observation_end:
+        out["observation_end"] = observation_end
+    return out

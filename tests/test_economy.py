@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -173,8 +174,9 @@ def test_economy_overview_all_sections_success(client):
         "FEDFUNDS": _overview_obs(
             [("2026-03-01", "4.25"), ("2025-12-01", "4.5"), ("2025-09-01", "4.6")]
         ),
+        # Consecutive CPI months so calendar MoM resolves (was sparse gaps → null MoM).
         "CPIAUCSL": _overview_obs(
-            [("2026-03-01", "322.0"), ("2026-01-01", "320.0"), ("2025-10-01", "318.0")]
+            [("2026-03-01", "322.0"), ("2026-02-01", "320.0"), ("2026-01-01", "318.0")]
         ),
         "CSUSHPISA": _overview_obs(
             [("2026-03-01", "322.1"), ("2025-12-01", "320.5"), ("2025-09-01", "319.0")]
@@ -208,6 +210,115 @@ def test_economy_overview_all_sections_success(client):
     assert gdp["observations"][0]["value"] == 23100.0
     assert gdp["observations"][1]["value"] == 23000.0
     assert gdp["observations"][2]["value"] == 22900.0
+
+    inf = sections["inflation"]
+    assert inf["momInflation"] == inf["observations"][0]["momInflation"]
+    assert inf["yoyInflation"] is None
+    assert inf["observations"][0]["momInflation"] == pytest.approx(0.62)
+    assert inf["observations"][0]["yoyInflation"] is None
+    assert inf["observations"][0]["acceleration"] == "decelerating"
+
+
+def test_economy_overview_invalid_observation_end(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/overview?observation_end=not-a-date")
+    assert resp.status_code == 400
+    assert "observation_end" in resp.get_json().get("error", "").lower()
+
+
+@responses.activate
+def test_economy_overview_observation_end_forwarded_and_echoed(client):
+    scenarios = {
+        "GDPC1": _overview_obs([("2025-11-01", "1")]),
+        "PCE": _overview_obs([("2025-11-01", "1")]),
+        "UNRATE": _overview_obs([("2025-11-01", "1")]),
+        "FEDFUNDS": _overview_obs([("2025-11-01", "1")]),
+        # Three levels so acceleration compares Nov MoM vs Oct MoM (needs Sep as prior for Oct).
+        "CPIAUCSL": _overview_obs(
+            [
+                ("2025-11-01", "300"),
+                ("2025-10-01", "299"),
+                ("2025-09-01", "298"),
+            ]
+        ),
+        "CSUSHPISA": _overview_obs([("2025-11-01", "1")]),
+    }
+    checked = {"n": 0}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        assert qs.get("observation_end") == ["2025-11-01"]
+        checked["n"] += 1
+        return _fred_callback(scenarios)(request)
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/overview?observation_end=2025-11-01")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data.get("observation_end") == "2025-11-01"
+    assert checked["n"] >= 1
+    inf = data["sections"]["inflation"]
+    assert inf["acceleration"] == "decelerating"
+    assert inf["acceleration"] == inf["observations"][0]["acceleration"]
+
+
+def _month_series_descending(base: date, n: int, cpi_start: int) -> list[tuple[str, str]]:
+    """Newest-first monthly ISO dates with CPI levels cpi_start, cpi_start-1, ..."""
+    rows: list[tuple[str, str]] = []
+
+    def add_months(d: date, delta: int) -> date:
+        idx = d.year * 12 + (d.month - 1) + delta
+        y, m0 = divmod(idx, 12)
+        return date(y, m0 + 1, 1)
+
+    for i in range(n):
+        dt = add_months(base, -i)
+        rows.append((dt.isoformat(), str(cpi_start - i)))
+    return rows
+
+
+@responses.activate
+def test_economy_overview_inflation_cpi_enrichment_yoy_and_section_headlines(client):
+    """CPI overview requests extra FRED rows so YoY exists for each displayed month."""
+    cpi_rows = _month_series_descending(date(2027, 1, 1), 22, 300)
+    scenarios = {
+        "GDPC1": _overview_obs([("2026-01-01", "1")]),
+        "PCE": _overview_obs([("2026-01-01", "1")]),
+        "UNRATE": _overview_obs([("2026-01-01", "1")]),
+        "FEDFUNDS": _overview_obs([("2026-01-01", "1")]),
+        "CPIAUCSL": _overview_obs(cpi_rows),
+        "CSUSHPISA": _overview_obs([("2026-01-01", "1")]),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/overview")
+    assert resp.status_code == 200
+    inf = resp.get_json()["sections"]["inflation"]
+    assert inf["series_id"] == "CPIAUCSL"
+    assert len(inf["observations"]) == 10
+
+    # Newest CPI 300 vs prior month 299 → (300-299)/299*100
+    assert inf["momInflation"] == pytest.approx(0.33)
+    assert inf["observations"][0]["momInflation"] == pytest.approx(0.33)
+    # YoY: 300 vs 288 at index 12
+    assert inf["yoyInflation"] == pytest.approx(4.17)
+    assert inf["observations"][0]["yoyInflation"] == pytest.approx(4.17)
+
+    assert inf["observations"][0]["acceleration"] == "decelerating"
+
+    assert inf["observations"][-1]["yoyInflation"] is not None
+    assert inf["observations"][-1]["momInflation"] is not None
 
 
 @responses.activate
