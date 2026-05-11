@@ -45,11 +45,7 @@ def fec_names_candidates():
         params["per_page"] = str(Config.OPENFEC_NAMES_PER_PAGE_DEFAULT)
 
     url = f"{Config.OPENFEC_BASE}/names/candidates/"
-    timeout = (
-        Config.OPENFEC_TYPEAHEAD_TIMEOUT_S
-        if typeahead
-        else Config.OPENFEC_DEFAULT_TIMEOUT_S
-    )
+    timeout = Config.OPENFEC_TYPEAHEAD_TIMEOUT_S if typeahead else Config.OPENFEC_DEFAULT_TIMEOUT_S
     t0 = time.perf_counter()
     resp = requests.get(url, params=params, timeout=timeout)
     log_upstream(

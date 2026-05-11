@@ -437,9 +437,7 @@ def test_payems_delta_series_forwards_units_and_sort_order(client):
         status=200,
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "myfredkey"}):
-        resp = client.get(
-            "/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
-        )
+        resp = client.get("/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc")
     assert resp.status_code == 200
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["api_key"] == ["myfredkey"]
