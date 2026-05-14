@@ -1,4 +1,4 @@
-"""FRED-backed economy summary for GET /api/economy/summary and overview aggregation."""
+"""FRED-backed economy summary for GET /api/economy/summary and dashboard aggregation."""
 
 from __future__ import annotations
 
@@ -82,6 +82,31 @@ OVERVIEW_SERIES: tuple[EconomyOverviewDef, ...] = (
         unit="index",
     ),
 )
+
+# App tab uses short ids in ``GET /api/economy/{id}/dashboard`` (see Hypatia ``SECTOR_ID_TO_OVERVIEW_KEY``).
+_ECONOMY_DASHBOARD_SECTOR_ALIASES: dict[str, str] = {
+    "consumer": "consumer_spending",
+    "rates": "interest_rates",
+}
+
+_OVERVIEW_SECTION_KEYS: frozenset[str] = frozenset(d.section_key for d in OVERVIEW_SERIES)
+
+
+def resolve_economy_dashboard_sector(path_segment: str) -> str | None:
+    """Map URL segment (canonical ``section_key`` or app sector id) to ``OVERVIEW_SERIES.section_key``."""
+    key = path_segment.strip().lower()
+    if not key:
+        return None
+    if key in _OVERVIEW_SECTION_KEYS:
+        return key
+    return _ECONOMY_DASHBOARD_SECTOR_ALIASES.get(key)
+
+
+def _overview_def_for_section(section_key: str) -> EconomyOverviewDef | None:
+    for d in OVERVIEW_SERIES:
+        if d.section_key == section_key:
+            return d
+    return None
 
 
 ECONOMY_TILES: tuple[EconomyTileDef, ...] = (
@@ -555,6 +580,29 @@ def build_economy_overview(
             sections[section_key] = body
 
     out: dict[str, Any] = {"as_of": as_of, "sections": sections}
+    if observation_end:
+        out["observation_end"] = observation_end
+    return out
+
+
+def build_economy_overview_sector(
+    api_key: str,
+    section_key: str,
+    *,
+    observation_end: str | None = None,
+) -> dict[str, Any]:
+    """Single-section dashboard slice: same shape as :func:`build_economy_overview` with one ``sections`` entry."""
+    overview = _overview_def_for_section(section_key)
+    if overview is None:
+        raise ValueError(f"Unknown economy overview section_key: {section_key!r}")
+
+    as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    _sk, body = _fetch_overview_series(
+        api_key,
+        overview,
+        observation_end=observation_end,
+    )
+    out: dict[str, Any] = {"as_of": as_of, "sections": {section_key: body}}
     if observation_end:
         out["observation_end"] = observation_end
     return out

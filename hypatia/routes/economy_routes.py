@@ -13,7 +13,9 @@ from economy import (
     FRED_OBSERVATIONS_URL,
     FRED_REQUEST_TIMEOUT,
     build_economy_overview,
+    build_economy_overview_sector,
     build_economy_summary,
+    resolve_economy_dashboard_sector,
 )
 from hypatia.http import missing_env_key_response
 from hypatia.logging_config import log_upstream
@@ -56,9 +58,9 @@ def economy_summary():
     return jsonify(build_economy_summary(api_key)), 200
 
 
-@bp.get("/api/economy/overview")
-def economy_overview():
-    """Overview series: recent observations per section."""
+@bp.get("/api/economy/dashboard")
+def economy_dashboard():
+    """Economy tab snapshot: recent FRED observations per section (`as_of`, `sections`)."""
     api_key = os.environ.get(Config.ENV_FRED, "").strip()
     if not api_key:
         return missing_env_key_response(Config.ENV_FRED)
@@ -77,6 +79,48 @@ def economy_overview():
 
     payload = build_economy_overview(
         api_key,
+        observation_end=observation_end or None,
+    )
+    return jsonify(payload), 200
+
+
+@bp.get("/api/economy/<sector_id>/dashboard")
+def economy_sector_dashboard(sector_id: str):
+    """One overview section for parallel tab loads (Hypatia ``GET …/api/economy/{sector}/dashboard``)."""
+    api_key = os.environ.get(Config.ENV_FRED, "").strip()
+    if not api_key:
+        return missing_env_key_response(Config.ENV_FRED)
+
+    section_key = resolve_economy_dashboard_sector(sector_id)
+    if section_key is None:
+        return (
+            jsonify(
+                {
+                    "error": "Unknown economy sector",
+                    "hint": (
+                        "Use a section id (gdp, labor, inflation, housing, consumer_spending, "
+                        "interest_rates) or app aliases consumer, rates"
+                    ),
+                }
+            ),
+            404,
+        )
+
+    observation_end = (request.args.get("observation_end") or "").strip()
+    if observation_end and _OVERVIEW_OBSERVATION_END_RE.fullmatch(observation_end) is None:
+        return (
+            jsonify(
+                {
+                    "error": "Invalid observation_end",
+                    "hint": "Use YYYY-MM-DD (e.g. 2025-11-01)",
+                }
+            ),
+            400,
+        )
+
+    payload = build_economy_overview_sector(
+        api_key,
+        section_key,
         observation_end=observation_end or None,
     )
     return jsonify(payload), 200

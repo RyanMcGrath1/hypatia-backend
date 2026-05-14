@@ -137,13 +137,81 @@ def test_economy_summary_one_tile_invalid_json(client):
 
 
 @responses.activate
-def test_economy_overview_missing_fred_key(client):
+def test_economy_dashboard_missing_fred_key(client):
     with patch.dict(os.environ, {"FRED_API_KEY": ""}):
-        resp = client.get("/api/economy/overview")
+        resp = client.get("/api/economy/dashboard")
     assert resp.status_code == 503
     data = resp.get_json()
     assert data["error"] == "Missing FRED_API_KEY"
     assert "hint" in data
+
+
+def test_economy_overview_path_removed_returns_404(client):
+    resp = client.get("/api/economy/overview")
+    assert resp.status_code == 404
+
+
+def test_economy_sector_dashboard_unknown_sector_returns_404(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/not-a-sector/dashboard")
+    assert resp.status_code == 404
+    assert "unknown" in resp.get_json().get("error", "").lower()
+
+
+@responses.activate
+def test_economy_sector_dashboard_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/labor/dashboard")
+    assert resp.status_code == 503
+
+
+@responses.activate
+def test_economy_sector_dashboard_labor_only_fetches_unrate(client):
+    scenarios = {
+        "UNRATE": _overview_obs(
+            [("2026-03-01", "4.0"), ("2025-11-01", "4.1"), ("2025-08-01", "4.2")]
+        ),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/labor/dashboard")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "as_of" in data
+    assert set(data["sections"]) == {"labor"}
+    lab = data["sections"]["labor"]
+    assert lab["series_id"] == "UNRATE"
+    assert len(lab["observations"]) == 3
+
+
+@responses.activate
+def test_economy_sector_dashboard_rates_alias_maps_to_interest_rates(client):
+    scenarios = {
+        "FEDFUNDS": _overview_obs([("2026-03-01", "4.25"), ("2025-12-01", "4.5")]),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/rates/dashboard")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(data["sections"]) == {"interest_rates"}
+    assert data["sections"]["interest_rates"]["series_id"] == "FEDFUNDS"
+
+
+def test_economy_sector_dashboard_invalid_observation_end(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/dashboard?observation_end=bad")
+    assert resp.status_code == 400
 
 
 def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
@@ -151,7 +219,7 @@ def _overview_obs(dates_values: list[tuple[str, str]]) -> dict:
 
 
 @responses.activate
-def test_economy_overview_all_sections_success(client):
+def test_economy_dashboard_all_sections_success(client):
     # FRED returns sort_order=desc: newest observation first; limit=3 caps rows.
     scenarios = {
         "GDPC1": _overview_obs(
@@ -189,7 +257,7 @@ def test_economy_overview_all_sections_success(client):
         content_type="application/json",
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/overview")
+        resp = client.get("/api/economy/dashboard")
     assert resp.status_code == 200
     data = resp.get_json()
     assert "as_of" in data
@@ -219,15 +287,15 @@ def test_economy_overview_all_sections_success(client):
     assert inf["observations"][0]["acceleration"] == "decelerating"
 
 
-def test_economy_overview_invalid_observation_end(client):
+def test_economy_dashboard_invalid_observation_end(client):
     with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
-        resp = client.get("/api/economy/overview?observation_end=not-a-date")
+        resp = client.get("/api/economy/dashboard?observation_end=not-a-date")
     assert resp.status_code == 400
     assert "observation_end" in resp.get_json().get("error", "").lower()
 
 
 @responses.activate
-def test_economy_overview_observation_end_forwarded_and_echoed(client):
+def test_economy_dashboard_observation_end_forwarded_and_echoed(client):
     scenarios = {
         "GDPC1": _overview_obs([("2025-11-01", "1")]),
         "PCE": _overview_obs([("2025-11-01", "1")]),
@@ -258,7 +326,7 @@ def test_economy_overview_observation_end_forwarded_and_echoed(client):
         content_type="application/json",
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/overview?observation_end=2025-11-01")
+        resp = client.get("/api/economy/dashboard?observation_end=2025-11-01")
     assert resp.status_code == 200
     data = resp.get_json()
     assert data.get("observation_end") == "2025-11-01"
@@ -284,7 +352,7 @@ def _month_series_descending(base: date, n: int, cpi_start: int) -> list[tuple[s
 
 
 @responses.activate
-def test_economy_overview_inflation_cpi_enrichment_yoy_and_section_headlines(client):
+def test_economy_dashboard_inflation_cpi_enrichment_yoy_and_section_headlines(client):
     """CPI overview requests extra FRED rows so YoY exists for each displayed month."""
     cpi_rows = _month_series_descending(date(2027, 1, 1), 22, 300)
     scenarios = {
@@ -302,7 +370,7 @@ def test_economy_overview_inflation_cpi_enrichment_yoy_and_section_headlines(cli
         content_type="application/json",
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/overview")
+        resp = client.get("/api/economy/dashboard")
     assert resp.status_code == 200
     inf = resp.get_json()["sections"]["inflation"]
     assert inf["series_id"] == "CPIAUCSL"
@@ -322,7 +390,7 @@ def test_economy_overview_inflation_cpi_enrichment_yoy_and_section_headlines(cli
 
 
 @responses.activate
-def test_economy_overview_one_series_http_error(client):
+def test_economy_dashboard_one_series_http_error(client):
     scenarios = {
         "GDPC1": _overview_obs([("2026-01-01", "1")]),
         "PCE": _overview_obs([("2026-01-01", "1")]),
@@ -338,7 +406,7 @@ def test_economy_overview_one_series_http_error(client):
         content_type="application/json",
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/overview")
+        resp = client.get("/api/economy/dashboard")
     assert resp.status_code == 200
     sections = resp.get_json()["sections"]
     assert "error" in sections["gdp"]

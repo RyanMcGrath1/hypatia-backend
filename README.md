@@ -1,6 +1,6 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary and overview, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary and dashboard, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
 
 ## Project layout
 
@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRE
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/summary`, `GET /api/economy/overview`, `GET /api/economy/fred/observations`)
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/summary`, `GET /api/economy/dashboard`, `GET /api/economy/fred/observations`)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/v1/names/candidates` and the alias `GET /api/fec/candidates`
 
@@ -71,7 +71,7 @@ Optional environment variables:
 
 Hypatia’s **text** logs use colors by default on interactive terminals (level, timestamp, logger name, request id). JSON logs stay plain for parsers. Control with **`LOG_COLOR`** (`auto` | `always` | `never`).
 
-Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures inside the summary/overview builders still log **warnings** with `tile_id` / `series_id` only.
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures inside the summary and dashboard builders still log **warnings** with `tile_id` / `series_id` only.
 
 Flask’s **Werkzeug** dev-server lines (e.g. `127.0.0.1 - - [date] "GET /..."`) keep their default styling; Hypatia’s application log lines are what `LOG_LEVEL` / `LOG_FORMAT` control.
 
@@ -125,7 +125,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
 | GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
-| GET | `/api/economy/overview` | Recent FRED observations per overview series; JSON has `as_of` and `sections` (see [Economy overview](#economy-overview-apieconomyoverview)) |
+| GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `sort_order`, `limit` |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
@@ -154,7 +154,7 @@ curl -sS "http://127.0.0.1:5001/api/economy/summary"
 
 (PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)
 
-### Economy overview (`/api/economy/overview`)
+### Economy dashboard (`/api/economy/dashboard`)
 
 Returns **HTTP 200** with:
 
@@ -166,7 +166,7 @@ Uses the same `FRED_API_KEY` as `/api/economy/summary`. If the key is missing, t
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/overview"
+curl -sS "http://127.0.0.1:5001/api/economy/dashboard"
 ```
 
 ### FRED series observations (`/api/economy/fred/observations`)
