@@ -15,6 +15,14 @@ from flask import Flask, g, has_request_context, request
 
 from hypatia.settings import env_truthy
 
+_XFF_HEADER = "X-Forwarded-For"
+
+
+def _xff_first_hop(raw: str) -> str | None:
+    """First client IP from ``X-Forwarded-For`` (comma-separated), or None if empty."""
+    part = raw.split(",")[0].strip()
+    return part or None
+
 
 def _log_color_enabled() -> bool:
     """Color text logs when stderr is a TTY unless ``LOG_COLOR`` overrides."""
@@ -52,13 +60,31 @@ class HypatiaJsonFormatter(logging.Formatter):
             "status_code",
             "duration_ms",
             "request_id",
+            "endpoint",
+            "blueprint",
+            "query_keys",
+            "remote_addr",
+            "x_forwarded_for",
+            "response_content_length",
+        ),
+        "http_request_start": (
+            "method",
+            "path",
+            "request_id",
+            "endpoint",
+            "blueprint",
+            "query_keys",
+            "remote_addr",
+            "x_forwarded_for",
         ),
         "upstream": (
             "service",
             "endpoint",
+            "method",
             "status_code",
             "duration_ms",
             "request_id",
+            "response_bytes",
         ),
     }
 
@@ -167,6 +193,24 @@ def register_request_logging(app: Flask) -> None:
         raw = request.headers.get("X-Request-ID", "").strip()
         g.request_id = raw if raw else str(uuid.uuid4())
         g._access_start = time.perf_counter()
+        if app.logger.isEnabledFor(logging.DEBUG) and not _should_skip_access_log(request.path):
+            rid = getattr(g, "request_id", None) or "-"
+            xff_raw = request.headers.get(_XFF_HEADER, "")
+            xff = _xff_first_hop(xff_raw) if xff_raw else None
+            app.logger.debug(
+                "http_request_start",
+                extra={
+                    "event": "http_request_start",
+                    "request_id": rid,
+                    "method": request.method,
+                    "path": request.path,
+                    "endpoint": request.endpoint,
+                    "blueprint": request.blueprint,
+                    "query_keys": sorted(request.args.keys()),
+                    "remote_addr": request.remote_addr,
+                    "x_forwarded_for": xff,
+                },
+            )
 
     @app.after_request
     def _log_request_and_header(response):
@@ -177,6 +221,9 @@ def register_request_logging(app: Flask) -> None:
                 return response
             start = getattr(g, "_access_start", None)
             duration_ms = (time.perf_counter() - start) * 1000.0 if start is not None else 0.0
+            xff_raw = request.headers.get(_XFF_HEADER, "")
+            xff = _xff_first_hop(xff_raw) if xff_raw else None
+            rcl = response.calculate_content_length()
             app.logger.info(
                 "http_request",
                 extra={
@@ -186,6 +233,12 @@ def register_request_logging(app: Flask) -> None:
                     "path": request.path,
                     "status_code": response.status_code,
                     "duration_ms": round(duration_ms, 2),
+                    "endpoint": request.endpoint,
+                    "blueprint": request.blueprint,
+                    "query_keys": sorted(request.args.keys()),
+                    "remote_addr": request.remote_addr,
+                    "x_forwarded_for": xff,
+                    "response_content_length": rcl,
                 },
             )
         except Exception:
@@ -200,20 +253,23 @@ def log_upstream(
     endpoint: str,
     status_code: int,
     duration_ms: float,
+    method: str = "GET",
+    response_bytes: int | None = None,
 ) -> None:
     """Log an outbound HTTP call (no URLs, query strings, or API keys)."""
     log = logging.getLogger(logger_name)
     rid = None
     if has_request_context():
         rid = getattr(g, "request_id", None)
-    log.info(
-        "upstream",
-        extra={
-            "event": "upstream",
-            "service": service,
-            "endpoint": endpoint,
-            "status_code": status_code,
-            "duration_ms": round(duration_ms, 2),
-            "request_id": rid,
-        },
-    )
+    extra: dict[str, Any] = {
+        "event": "upstream",
+        "service": service,
+        "endpoint": endpoint,
+        "method": method.upper(),
+        "status_code": status_code,
+        "duration_ms": round(duration_ms, 2),
+        "request_id": rid,
+    }
+    if response_bytes is not None:
+        extra["response_bytes"] = int(response_bytes)
+    log.info("upstream", extra=extra)

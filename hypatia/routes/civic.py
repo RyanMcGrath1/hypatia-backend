@@ -39,6 +39,7 @@ def civic_divisions_by_address():
         endpoint="divisionsByAddress",
         status_code=resp.status_code,
         duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
     )
     try:
         data = resp.json()

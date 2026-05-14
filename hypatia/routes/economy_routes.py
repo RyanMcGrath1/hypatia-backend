@@ -135,6 +135,7 @@ def fred_series_observations():
         endpoint="series/observations",
         status_code=resp.status_code,
         duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
     )
     try:
         data = resp.json()
@@ -191,6 +192,7 @@ def fred_payems_delta_series():
         endpoint="series/observations",
         status_code=resp.status_code,
         duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
     )
     try:
         data = resp.json()
