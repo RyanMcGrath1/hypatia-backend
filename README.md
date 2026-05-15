@@ -1,6 +1,6 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy summary and dashboard, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy overview, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
 
 ## Project layout
 
@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRE
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/summary`, `GET /api/economy/dashboard`, `GET /api/economy/fred/observations`)
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/overview`, `GET /api/economy/<sector>/dashboard`, `GET /api/economy/fred/observations`, `GET /api/economy/fred/series/PAYEMS/delta`)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/v1/names/candidates` and the alias `GET /api/fec/candidates`
 
@@ -71,7 +71,7 @@ Optional environment variables:
 
 Hypatia’s **text** logs use colors by default on interactive terminals (level, timestamp, logger name, request id). JSON logs stay plain for parsers. Control with **`LOG_COLOR`** (`auto` | `always` | `never`).
 
-Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED tile failures inside the summary and dashboard builders still log **warnings** with `tile_id` / `series_id` only.
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED failures inside the economy overview builders still log **warnings** with `section_key` / `series_id` only.
 
 Flask’s **Werkzeug** dev-server lines (e.g. `127.0.0.1 - - [date] "GET /..."`) keep their default styling; Hypatia’s application log lines are what `LOG_LEVEL` / `LOG_FORMAT` control.
 
@@ -124,10 +124,10 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/health` | Same JSON as `/hello` (load balancers) |
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
-| GET | `/api/economy/summary` | Latest FRED observations for configured economy tiles (`cpi_all_items`, `unemployment_rate`, `federal_funds_effective`); JSON has `as_of` and `tiles` |
-| GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
+| GET | `/api/economy/overview` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy overview](#economy-overview-apieconomyoverview)) |
+| GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/overview`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
-| GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `sort_order`, `limit` |
+| GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
 | GET | `/api/fec/candidates?...` | Same as `/api/fec/v1/names/candidates` (backward-compatible alias) |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
@@ -137,36 +137,19 @@ If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON 
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
-### Economy summary (`/api/economy/summary`)
-
-Returns **HTTP 200** with:
-
-- `as_of`: ISO-8601 UTC timestamp when the snapshot was built.
-- `tiles`: object keyed by `tile_id`. Each value is either a success object (`label`, `series_id`, `unit`, `value`, `observation_date`, and optionally `change`, `prior_observation_date`) or an error object (`error`, optional `hint`) if that series failed.
-
-If `FRED_API_KEY` is missing, the route returns **503** with `error` `Missing FRED_API_KEY` (same pattern as the civic key).
-
-Example:
-
-```bash
-curl -sS "http://127.0.0.1:5001/api/economy/summary"
-```
-
-(PowerShell: `curl.exe` if `curl` is aliased to `Invoke-WebRequest`.)
-
-### Economy dashboard (`/api/economy/dashboard`)
+### Economy overview (`/api/economy/overview`)
 
 Returns **HTTP 200** with:
 
 - `as_of`: ISO-8601 UTC timestamp when the snapshot was built.
 - `sections`: object keyed by section; each value holds recent FRED observations for that overview series (newest first within each section).
 
-Uses the same `FRED_API_KEY` as `/api/economy/summary`. If the key is missing, the route returns **503** with `Missing FRED_API_KEY`.
+If `FRED_API_KEY` is missing, the route returns **503** with `Missing FRED_API_KEY`.
 
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/dashboard"
+curl -sS "http://127.0.0.1:5001/api/economy/overview"
 ```
 
 ### FRED series observations (`/api/economy/fred/observations`)

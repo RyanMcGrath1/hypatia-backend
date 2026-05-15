@@ -1,4 +1,4 @@
-"""FRED-backed economy summary for GET /api/economy/summary and dashboard aggregation."""
+"""FRED-backed economy overview aggregation for GET /api/economy/overview routes."""
 
 from __future__ import annotations
 
@@ -27,13 +27,77 @@ OVERVIEW_RECENT_OBSERVATIONS = 10
 OVERVIEW_INFLATION_SECTION_KEY = "inflation"
 OVERVIEW_INFLATION_FRED_LIMIT = OVERVIEW_RECENT_OBSERVATIONS + 12 + 26
 
+# Sector dashboard: FRED row cap when querying an explicit observation window.
+SECTOR_DASHBOARD_FRED_ROW_CAP = 2500
 
-@dataclass(frozen=True)
-class EconomyTileDef:
-    tile_id: str
-    series_id: str
-    label: str
-    unit: str
+
+def _sector_dashboard_clock_today() -> date:
+    """UTC calendar date for default sector dashboard window (tests may patch)."""
+    return datetime.now(timezone.utc).date()
+
+
+def resolve_sector_dashboard_observation_window(
+    q_start: str | None,
+    q_end: str | None,
+    *,
+    today: date | None = None,
+) -> tuple[str, str]:
+    """Inclusive FRED window for ``GET /api/economy/<sector>/dashboard``.
+
+    Defaults to **year-to-date (UTC)**: ``{today.year}-01-01`` through ``today``.
+
+    * Both omitted → YTD (UTC).
+    * Only ``observation_start`` → that date … ``today`` (UTC).
+    * Only ``observation_end`` → ``Jan 1`` of that date's year … ``observation_end``.
+    """
+    day = today if today is not None else _sector_dashboard_clock_today()
+
+    def norm(x: str | None) -> str | None:
+        if x is None:
+            return None
+        t = x.strip()
+        return t or None
+
+    s0, e0 = norm(q_start), norm(q_end)
+
+    def parse_iso(label: str, raw: str) -> date:
+        try:
+            return date.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid {label}: use YYYY-MM-DD (e.g. 2025-11-01)",
+            ) from exc
+
+    if s0 is None and e0 is None:
+        return f"{day.year}-01-01", day.isoformat()
+
+    try:
+        if s0 is not None and e0 is not None:
+            ds, de = parse_iso("observation_start", s0), parse_iso("observation_end", e0)
+            if ds > de:
+                raise ValueError("observation_start must be <= observation_end")
+            return ds.isoformat(), de.isoformat()
+        if s0 is not None:
+            ds = parse_iso("observation_start", s0)
+            if ds > day:
+                raise ValueError("observation_start cannot be after today (UTC)")
+            return ds.isoformat(), day.isoformat()
+        assert e0 is not None
+        de = parse_iso("observation_end", e0)
+        ds = date(de.year, 1, 1)
+        if ds > de:
+            raise ValueError("observation_start must be <= observation_end")
+        return ds.isoformat(), de.isoformat()
+    except ValueError as exc:
+        msg = str(exc)
+        if msg.startswith("Invalid ") or msg.startswith("observation_"):
+            raise
+        raise ValueError("Invalid observation_start or observation_end") from exc
+
+
+def _observation_row_in_window(row_date: str, start: str, end: str) -> bool:
+    d = row_date.strip()
+    return start <= d <= end
 
 
 @dataclass(frozen=True)
@@ -107,28 +171,6 @@ def _overview_def_for_section(section_key: str) -> EconomyOverviewDef | None:
         if d.section_key == section_key:
             return d
     return None
-
-
-ECONOMY_TILES: tuple[EconomyTileDef, ...] = (
-    EconomyTileDef(
-        tile_id="cpi_all_items",
-        series_id="CPIAUCSL",
-        label="Consumer Price Index for All Urban Consumers: All Items",
-        unit="index",
-    ),
-    EconomyTileDef(
-        tile_id="unemployment_rate",
-        series_id="UNRATE",
-        label="Unemployment Rate",
-        unit="percent",
-    ),
-    EconomyTileDef(
-        tile_id="federal_funds_effective",
-        series_id="FEDFUNDS",
-        label="Federal Funds Effective Rate",
-        unit="percent",
-    ),
-)
 
 
 def _parse_observation_value(raw: str) -> int | float | str:
@@ -296,140 +338,45 @@ def _attach_inflation_derived_fields(
         obs["acceleration"] = _inflation_acceleration(mom_accel, mom_accel_prior)
 
 
-def _fetch_single_tile(api_key: str, tile: EconomyTileDef) -> tuple[str, dict[str, Any]]:
-    """Return (tile_id, success_payload or error_payload)."""
-    params = {
-        "series_id": tile.series_id,
-        "api_key": api_key,
-        "file_type": "json",
-        "sort_order": "desc",
-        "limit": "2",
-    }
-    try:
-        resp = requests.get(
-            FRED_OBSERVATIONS_URL,
-            params=params,
-            timeout=FRED_REQUEST_TIMEOUT,
-        )
-    except requests.Timeout:
-        logger.warning(
-            "FRED request timed out tile_id=%s series_id=%s",
-            tile.tile_id,
-            tile.series_id,
-        )
-        return (
-            tile.tile_id,
-            {
-                "error": "FRED request timed out",
-                "hint": f"series_id={tile.series_id}",
-            },
-        )
-    except requests.RequestException as exc:
-        logger.warning(
-            "FRED request failed tile_id=%s series_id=%s error=%s",
-            tile.tile_id,
-            tile.series_id,
-            exc,
-        )
-        return (
-            tile.tile_id,
-            {
-                "error": "FRED request failed",
-                "hint": f"series_id={tile.series_id}: {exc!s}",
-            },
-        )
-
-    if not resp.ok:
-        return (
-            tile.tile_id,
-            {
-                "error": f"FRED returned HTTP {resp.status_code}",
-                "hint": f"series_id={tile.series_id}",
-            },
-        )
-
-    try:
-        payload = resp.json()
-    except ValueError:
-        return (
-            tile.tile_id,
-            {
-                "error": "Invalid JSON from FRED",
-                "hint": f"series_id={tile.series_id}",
-            },
-        )
-
-    observations = payload.get("observations")
-    if not isinstance(observations, list) or not observations:
-        return (
-            tile.tile_id,
-            {
-                "error": "No observations in FRED response",
-                "hint": f"series_id={tile.series_id}",
-            },
-        )
-
-    latest = observations[0]
-    if not isinstance(latest, dict):
-        return (
-            tile.tile_id,
-            {
-                "error": "Malformed FRED observations",
-                "hint": f"series_id={tile.series_id}",
-            },
-        )
-
-    latest_date = str(latest.get("date", "")).strip()
-    latest_raw = str(latest.get("value", "")).strip()
-    value = _parse_observation_value(latest_raw)
-
-    out: dict[str, Any] = {
-        "label": tile.label,
-        "series_id": tile.series_id,
-        "unit": tile.unit,
-        "value": value,
-        "observation_date": latest_date,
-    }
-
-    if len(observations) > 1:
-        prior = observations[1]
-        if isinstance(prior, dict):
-            prior_raw = str(prior.get("value", "")).strip()
-            prior_date = str(prior.get("date", "")).strip()
-            prior_val = _parse_observation_value(prior_raw)
-            out["prior_observation_date"] = prior_date
-            if isinstance(value, (int, float)) and isinstance(  # noqa: UP038
-                prior_val, (int, float)
-            ):
-                out["change"] = round(float(value) - float(prior_val), 6)
-
-    return tile.tile_id, out
-
-
 def _fetch_overview_series(
     api_key: str,
     overview: EconomyOverviewDef,
     *,
+    observation_start: str | None = None,
     observation_end: str | None = None,
+    window_mode: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Return (section_key, payload with observations or error).
 
     Observations are the most recent releases per series (newest first).
+
+    ``window_mode`` (sector dashboards): FRED is called with ``observation_start`` and
+    ``observation_end`` and **all** points in that inclusive window are returned (capped by
+    :data:`SECTOR_DASHBOARD_FRED_ROW_CAP`). Otherwise the compact overview path returns the
+    latest :data:`OVERVIEW_RECENT_OBSERVATIONS` rows (inflation uses an extended fetch).
     """
-    fetch_limit = (
-        OVERVIEW_INFLATION_FRED_LIMIT
-        if overview.section_key == OVERVIEW_INFLATION_SECTION_KEY
-        else OVERVIEW_RECENT_OBSERVATIONS
-    )
+    if window_mode:
+        if not observation_start or not observation_end:
+            raise ValueError("window_mode requires observation_start and observation_end")
+        fred_cap = SECTOR_DASHBOARD_FRED_ROW_CAP
+    elif overview.section_key == OVERVIEW_INFLATION_SECTION_KEY:
+        fred_cap = OVERVIEW_INFLATION_FRED_LIMIT
+    else:
+        fred_cap = OVERVIEW_RECENT_OBSERVATIONS
+
     params: dict[str, str] = {
         "series_id": overview.series_id,
         "api_key": api_key,
         "file_type": "json",
         "sort_order": "desc",
-        "limit": str(fetch_limit),
+        "limit": str(fred_cap),
     }
-    if observation_end:
+    if window_mode:
+        params["observation_start"] = observation_start
         params["observation_end"] = observation_end
+    elif observation_end:
+        params["observation_end"] = observation_end
+
     try:
         resp = requests.get(
             FRED_OBSERVATIONS_URL,
@@ -496,7 +443,7 @@ def _fetch_overview_series(
 
     parsed_all: list[dict[str, Any]] = []
     for row in observations:
-        if len(parsed_all) >= fetch_limit:
+        if len(parsed_all) >= fred_cap:
             break
         if not isinstance(row, dict):
             continue
@@ -509,7 +456,16 @@ def _fetch_overview_series(
             }
         )
 
-    out_obs = parsed_all[:OVERVIEW_RECENT_OBSERVATIONS]
+    if window_mode:
+        assert observation_start is not None and observation_end is not None
+        parsed_all = [
+            o
+            for o in parsed_all
+            if _observation_row_in_window(str(o.get("date", "")), observation_start, observation_end)
+        ]
+        out_obs = parsed_all
+    else:
+        out_obs = parsed_all[:OVERVIEW_RECENT_OBSERVATIONS]
 
     if not out_obs:
         return (
@@ -534,21 +490,6 @@ def _fetch_overview_series(
         body["acceleration"] = head.get("acceleration")
 
     return overview.section_key, body
-
-
-def build_economy_summary(api_key: str) -> dict[str, Any]:
-    """Build summary dict: as_of (ISO UTC), tiles keyed by tile_id."""
-    as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    tiles: dict[str, Any] = {}
-
-    max_workers = max(1, len(ECONOMY_TILES))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(_fetch_single_tile, api_key, tile) for tile in ECONOMY_TILES]
-        for fut in concurrent.futures.as_completed(futures):
-            tile_id, body = fut.result()
-            tiles[tile_id] = body
-
-    return {"as_of": as_of, "tiles": tiles}
 
 
 def build_economy_overview(
@@ -589,9 +530,10 @@ def build_economy_overview_sector(
     api_key: str,
     section_key: str,
     *,
-    observation_end: str | None = None,
+    observation_start: str,
+    observation_end: str,
 ) -> dict[str, Any]:
-    """Single-section dashboard slice: same shape as :func:`build_economy_overview` with one ``sections`` entry."""
+    """Single-sector dashboard slice for an inclusive FRED observation window (sector routes)."""
     overview = _overview_def_for_section(section_key)
     if overview is None:
         raise ValueError(f"Unknown economy overview section_key: {section_key!r}")
@@ -600,9 +542,13 @@ def build_economy_overview_sector(
     _sk, body = _fetch_overview_series(
         api_key,
         overview,
+        observation_start=observation_start,
         observation_end=observation_end,
+        window_mode=True,
     )
-    out: dict[str, Any] = {"as_of": as_of, "sections": {section_key: body}}
-    if observation_end:
-        out["observation_end"] = observation_end
-    return out
+    return {
+        "as_of": as_of,
+        "sections": {section_key: body},
+        "observation_start": observation_start,
+        "observation_end": observation_end,
+    }

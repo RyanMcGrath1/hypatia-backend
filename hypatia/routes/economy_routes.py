@@ -14,8 +14,8 @@ from economy import (
     FRED_REQUEST_TIMEOUT,
     build_economy_overview,
     build_economy_overview_sector,
-    build_economy_summary,
     resolve_economy_dashboard_sector,
+    resolve_sector_dashboard_observation_window,
 )
 from hypatia.http import missing_env_key_response
 from hypatia.logging_config import log_upstream
@@ -48,18 +48,8 @@ _FRED_OBS_LIMIT_MAX = 10_000
 _PAYEMS_SERIES_ID = "PAYEMS"
 
 
-@bp.get("/api/economy/summary")
-def economy_summary():
-    """Configured tiles: latest (and optional prior) observations."""
-    api_key = os.environ.get(Config.ENV_FRED, "").strip()
-    if not api_key:
-        return missing_env_key_response(Config.ENV_FRED)
-
-    return jsonify(build_economy_summary(api_key)), 200
-
-
-@bp.get("/api/economy/dashboard")
-def economy_dashboard():
+@bp.get("/api/economy/overview")
+def economy_overview():
     """Economy tab snapshot: recent FRED observations per section (`as_of`, `sections`)."""
     api_key = os.environ.get(Config.ENV_FRED, "").strip()
     if not api_key:
@@ -86,7 +76,9 @@ def economy_dashboard():
 
 @bp.get("/api/economy/<sector_id>/dashboard")
 def economy_sector_dashboard(sector_id: str):
-    """One overview section for parallel tab loads (Hypatia ``GET …/api/economy/{sector}/dashboard``)."""
+    """One overview section. Default FRED window is **YTD (UTC)**; optional ``observation_start`` /
+    ``observation_end`` (``YYYY-MM-DD``, inclusive) override.
+    """
     api_key = os.environ.get(Config.ENV_FRED, "").strip()
     if not api_key:
         return missing_env_key_response(Config.ENV_FRED)
@@ -106,13 +98,17 @@ def economy_sector_dashboard(sector_id: str):
             404,
         )
 
-    observation_end = (request.args.get("observation_end") or "").strip()
-    if observation_end and _OVERVIEW_OBSERVATION_END_RE.fullmatch(observation_end) is None:
+    try:
+        obs_start, obs_end = resolve_sector_dashboard_observation_window(
+            request.args.get("observation_start"),
+            request.args.get("observation_end"),
+        )
+    except ValueError as exc:
         return (
             jsonify(
                 {
-                    "error": "Invalid observation_end",
-                    "hint": "Use YYYY-MM-DD (e.g. 2025-11-01)",
+                    "error": str(exc),
+                    "hint": "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC).",
                 }
             ),
             400,
@@ -121,7 +117,8 @@ def economy_sector_dashboard(sector_id: str):
     payload = build_economy_overview_sector(
         api_key,
         section_key,
-        observation_end=observation_end or None,
+        observation_start=obs_start,
+        observation_end=obs_end,
     )
     return jsonify(payload), 200
 
