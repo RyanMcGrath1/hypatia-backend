@@ -552,3 +552,169 @@ def build_economy_overview_sector(
         "observation_start": observation_start,
         "observation_end": observation_end,
     }
+
+
+# ---------------------------------------------------------------------------
+# Labor employment-by-sector endpoint (GET /api/economy/labor/sector)
+# ---------------------------------------------------------------------------
+
+EMPLOYMENT_SECTOR_LOOKBACK_MONTHS = 12
+
+# FRED ``US*`` / ``PAYEMS`` / ``MANEMP`` ids (seasonally adjusted, thousands of persons).
+# ``CES*0000000001`` codes are BLS-style but are not valid ``series_id`` values on FRED.
+EMPLOYMENT_SECTOR_SERIES: tuple[tuple[str, str], ...] = (
+    ("PAYEMS", "Total Nonfarm Payrolls"),
+    ("USPBS", "Professional & Business Services"),
+    ("USEHS", "Education & Health Services"),
+    ("USLAH", "Leisure & Hospitality"),
+    ("USTRADE", "Retail Trade"),
+    ("MANEMP", "Manufacturing"),
+    ("USFIRE", "Financial Activities"),
+    ("USCONS", "Construction"),
+    ("USINFO", "Information Sector"),
+)
+
+EMPLOYMENT_SECTOR_NAMES: dict[str, str] = dict(EMPLOYMENT_SECTOR_SERIES)
+
+_EMPLOYMENT_NETWORK_ERROR_PREFIXES = (
+    "FRED request timed out",
+    "FRED request failed",
+)
+
+
+def _employment_sector_today() -> date:
+    """UTC calendar date; module-level so tests can patch it deterministically."""
+    return datetime.now(timezone.utc).date()
+
+
+def _employment_sector_window(today: date) -> tuple[str, str]:
+    """Inclusive ``[today - 12 months, today]`` window as ISO ``YYYY-MM-DD`` strings."""
+    try:
+        start = today.replace(year=today.year - EMPLOYMENT_SECTOR_LOOKBACK_MONTHS // 12)
+    except ValueError:
+        # Feb 29 in a leap year → clamp to Feb 28 of the prior year.
+        start = today.replace(year=today.year - 1, day=28)
+    return start.isoformat(), today.isoformat()
+
+
+def _clean_employment_value(raw: Any) -> str | None:
+    """FRED uses ``"."`` (and occasionally empty strings) for missing values."""
+    if not isinstance(raw, str):
+        return None if raw is None else str(raw)
+    s = raw.strip()
+    if not s or s == ".":
+        return None
+    return s
+
+
+def fetch_fred_series(series_id: str, start_date: str, api_key: str) -> dict[str, Any]:
+    """GET FRED ``series/observations`` for one series since ``start_date`` (inclusive).
+
+    Returns ``{"observations": [{"date": str, "value": str | None}, ...]}`` on success
+    (raw FRED values preserved as strings; ``"."`` → ``None``). On any failure returns
+    ``{"observations": [], "error": "<message>"}`` and never raises.
+    """
+    params: dict[str, str] = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "observation_start": start_date,
+        "sort_order": "asc",
+    }
+    try:
+        resp = requests.get(
+            FRED_OBSERVATIONS_URL,
+            params=params,
+            timeout=FRED_REQUEST_TIMEOUT,
+        )
+    except requests.Timeout:
+        logger.warning("FRED sector request timed out series_id=%s", series_id)
+        return {"observations": [], "error": "FRED request timed out"}
+    except requests.RequestException as exc:
+        logger.warning("FRED sector request failed series_id=%s error=%s", series_id, exc)
+        return {"observations": [], "error": f"FRED request failed: {exc!s}"}
+
+    if not resp.ok:
+        err_msg = f"FRED returned HTTP {resp.status_code}"
+        try:
+            err_body = resp.json()
+            if isinstance(err_body.get("error_message"), str):
+                err_msg = err_body["error_message"]
+        except ValueError:
+            pass
+        return {"observations": [], "error": err_msg}
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {"observations": [], "error": "Invalid JSON from FRED"}
+
+    raw_obs = payload.get("observations")
+    if not isinstance(raw_obs, list):
+        return {"observations": [], "error": "No observations in FRED response"}
+
+    cleaned: list[dict[str, Any]] = []
+    for row in raw_obs:
+        if not isinstance(row, dict):
+            continue
+        d = row.get("date")
+        if not isinstance(d, str):
+            continue
+        cleaned.append({"date": d, "value": _clean_employment_value(row.get("value"))})
+    return {"observations": cleaned}
+
+
+def build_employment_sectors(
+    api_key: str,
+    *,
+    today: date | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Parallel fetch of the configured employment sectors over the trailing 12 months.
+
+    Returns ``(payload, all_network_failed)``. ``payload`` matches the documented schema;
+    ``all_network_failed`` is true only when **every** series failed with a network-level
+    exception (timeout/connection), which the caller surfaces as ``503``.
+    """
+    day = today if today is not None else _employment_sector_today()
+    start_date, end_date = _employment_sector_window(day)
+
+    results: dict[str, dict[str, Any]] = {}
+    workers = max(1, len(EMPLOYMENT_SECTOR_SERIES))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(fetch_fred_series, sid, start_date, api_key): sid
+            for sid, _name in EMPLOYMENT_SECTOR_SERIES
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            results[futures[fut]] = fut.result()
+
+    sectors: dict[str, Any] = {}
+    series_list: list[dict[str, Any]] = []
+    network_failed = 0
+
+    for sid, name in EMPLOYMENT_SECTOR_SERIES:
+        body = results[sid]
+        observations = body.get("observations") or []
+        err = body.get("error")
+
+        sector_entry: dict[str, Any] = {"name": name, "observations": observations}
+        series_entry: dict[str, Any] = {
+            "id": sid,
+            "name": name,
+            "points": [[obs["date"], obs["value"]] for obs in observations],
+        }
+        if err:
+            sector_entry["error"] = err
+            series_entry["error"] = err
+            if err.startswith(_EMPLOYMENT_NETWORK_ERROR_PREFIXES):
+                network_failed += 1
+        sectors[sid] = sector_entry
+        series_list.append(series_entry)
+
+    payload = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "sectors": sectors,
+        "series": series_list,
+    }
+    return payload, network_failed == len(EMPLOYMENT_SECTOR_SERIES)

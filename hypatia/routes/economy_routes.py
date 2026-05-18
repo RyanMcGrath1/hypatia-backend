@@ -14,6 +14,7 @@ from economy import (
     FRED_REQUEST_TIMEOUT,
     build_economy_overview,
     build_economy_overview_sector,
+    build_employment_sectors,
     resolve_economy_dashboard_sector,
     resolve_sector_dashboard_observation_window,
 )
@@ -120,6 +121,25 @@ def economy_sector_dashboard(sector_id: str):
         observation_start=obs_start,
         observation_end=obs_end,
     )
+    return jsonify(payload), 200
+
+
+@bp.get("/api/economy/labor/sector")
+def economy_labor_sector():
+    """Trailing-12-month employment level by sector across configured FRED series.
+
+    Response shape: ``start_date`` / ``end_date`` (window ends today, UTC), ``sectors``
+    keyed by FRED series id (each ``{"name", "observations": [{"date", "value"}]}``,
+    with ``"error"`` when that series failed), and a chart-friendly ``series`` list of
+    ``{"id", "name", "points": [[date, value], ...]}``.
+    """
+    api_key = os.environ.get(Config.ENV_FRED, "").strip()
+    if not api_key:
+        return missing_env_key_response(Config.ENV_FRED)
+
+    payload, all_network_failed = build_employment_sectors(api_key)
+    if all_network_failed:
+        return jsonify({"error": "FRED API unavailable"}), 503
     return jsonify(payload), 200
 
 

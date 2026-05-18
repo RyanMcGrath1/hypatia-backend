@@ -373,6 +373,157 @@ def test_economy_overview_one_series_http_error(client):
     assert sections["labor"]["series_id"] == "UNRATE"
 
 
+_EMPLOYMENT_SECTOR_IDS = (
+    "PAYEMS",
+    "USPBS",
+    "USEHS",
+    "USLAH",
+    "USTRADE",
+    "MANEMP",
+    "USFIRE",
+    "USCONS",
+    "USINFO",
+)
+
+
+def _employment_scenarios(value_by_series: dict[str, str] | None = None) -> dict:
+    value_by_series = value_by_series or {}
+    return {
+        sid: {
+            "observations": [
+                {"date": "2025-06-01", "value": value_by_series.get(sid, "100")},
+                {"date": "2025-07-01", "value": value_by_series.get(sid, "101")},
+            ]
+        }
+        for sid in _EMPLOYMENT_SECTOR_IDS
+    }
+
+
+def test_economy_labor_sector_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_labor_sector_all_series_success(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_employment_scenarios()),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
+        patch("economy._employment_sector_today", return_value=fixed_today),
+    ):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["start_date"] == "2025-05-18"
+    assert data["end_date"] == "2026-05-18"
+    assert set(data["sectors"].keys()) == set(_EMPLOYMENT_SECTOR_IDS)
+    payems = data["sectors"]["PAYEMS"]
+    assert payems["name"] == "Total Nonfarm Payrolls"
+    assert "error" not in payems
+    assert payems["observations"][0] == {"date": "2025-06-01", "value": "100"}
+    series_ids = [s["id"] for s in data["series"]]
+    assert series_ids == list(_EMPLOYMENT_SECTOR_IDS)
+    assert data["series"][0]["points"][0] == ["2025-06-01", "100"]
+
+
+@responses.activate
+def test_economy_labor_sector_forwards_observation_start_and_api_key(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_employment_scenarios()),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "secret-key"}),
+        patch("economy._employment_sector_today", return_value=fixed_today),
+    ):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 200
+    assert len(responses.calls) == len(_EMPLOYMENT_SECTOR_IDS)
+    for call in responses.calls:
+        qs = parse_qs(urlparse(call.request.url).query)
+        assert qs["api_key"] == ["secret-key"]
+        assert qs["file_type"] == ["json"]
+        assert qs["observation_start"] == ["2025-05-18"]
+        assert qs["series_id"][0] in _EMPLOYMENT_SECTOR_IDS
+
+
+@responses.activate
+def test_economy_labor_sector_one_series_http_404_partial(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_employment_scenarios(), http_404_series="MANEMP"),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "k"}),
+        patch("economy._employment_sector_today", return_value=fixed_today),
+    ):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 200
+    sectors = resp.get_json()["sectors"]
+    assert sectors["MANEMP"]["error"] == "FRED returned HTTP 404"
+    assert sectors["MANEMP"]["observations"] == []
+    assert "error" not in sectors["PAYEMS"]
+
+
+@responses.activate
+def test_economy_labor_sector_cleans_missing_value_to_null(client):
+    scenarios = {
+        sid: {
+            "observations": [
+                {"date": "2025-06-01", "value": "."},
+                {"date": "2025-07-01", "value": "101"},
+            ]
+        }
+        for sid in _EMPLOYMENT_SECTOR_IDS
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "k"}),
+        patch("economy._employment_sector_today", return_value=fixed_today),
+    ):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 200
+    payems = resp.get_json()["sectors"]["PAYEMS"]["observations"]
+    assert payems[0] == {"date": "2025-06-01", "value": None}
+    assert payems[1] == {"date": "2025-07-01", "value": "101"}
+
+
+def test_economy_labor_sector_returns_503_when_all_network_failed(client):
+    fixed_today = date(2026, 5, 18)
+
+    def boom(*_args, **_kwargs):
+        return {"observations": [], "error": "FRED request failed: boom"}
+
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "k"}),
+        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy.fetch_fred_series", side_effect=boom),
+    ):
+        resp = client.get("/api/economy/labor/sector")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
+
+
 @responses.activate
 def test_fred_observations_missing_fred_key(client):
     with patch.dict(os.environ, {"FRED_API_KEY": ""}):

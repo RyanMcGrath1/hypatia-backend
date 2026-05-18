@@ -128,6 +128,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/overview`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
+| GET | `/api/economy/labor/sector` | Trailing 12-month employment by sector across nine FRED series; JSON has `start_date`, `end_date`, `sectors`, and a chart-friendly `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)) |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
 | GET | `/api/fec/candidates?...` | Same as `/api/fec/v1/names/candidates` (backward-compatible alias) |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
@@ -176,6 +177,37 @@ Example:
 
 ```bash
 curl -sS "http://127.0.0.1:5001/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
+```
+
+### Labor employment by sector (`/api/economy/labor/sector`)
+
+Returns the trailing **12 months** of employment levels for a fixed set of FRED series, fetched in parallel.
+
+Series (id → human name):
+
+- `PAYEMS` — Total Nonfarm Payrolls
+- `USPBS` — Professional & Business Services
+- `USEHS` — Education & Health Services
+- `USLAH` — Leisure & Hospitality
+- `USTRADE` — Retail Trade
+- `MANEMP` — Manufacturing
+- `USFIRE` — Financial Activities
+- `USCONS` — Construction
+- `USINFO` — Information Sector
+
+Response (HTTP 200) shape:
+
+- `start_date` — `today - 12 months` (UTC, ISO `YYYY-MM-DD`), forwarded to FRED as `observation_start`.
+- `end_date` — `today` (UTC).
+- `sectors` — object keyed by FRED `series_id`. Each value is `{"name", "observations": [{"date", "value"}]}`. FRED's `"."` is converted to `null`; everything else stays as the raw FRED string. On per-series failure the entry also includes `"error": "<message>"` and `"observations": []`.
+- `series` — chart-ready list of `{"id", "name", "points": [[date, value], ...]}` (same data, parallel to `sectors`).
+
+`FRED_API_KEY` missing → **503** `Missing FRED_API_KEY` (consistent with the other economy routes). When **every** series fails at the network layer (timeout / connection error), the route returns **503** `FRED API unavailable`; otherwise individual failures are surfaced in-band per sector.
+
+Example (port **5001**):
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/labor/sector"
 ```
 
 ### OpenFEC candidate names (`/api/fec/v1/names/candidates` and `/api/fec/candidates`)
