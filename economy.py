@@ -558,8 +558,6 @@ def build_economy_overview_sector(
 # Labor employment-by-sector endpoint (GET /api/economy/labor/sector)
 # ---------------------------------------------------------------------------
 
-EMPLOYMENT_SECTOR_LOOKBACK_MONTHS = 12
-
 # FRED ``US*`` / ``PAYEMS`` / ``MANEMP`` ids (seasonally adjusted, thousands of persons).
 # ``CES*0000000001`` codes are BLS-style but are not valid ``series_id`` values on FRED.
 EMPLOYMENT_SECTOR_SERIES: tuple[tuple[str, str], ...] = (
@@ -582,21 +580,6 @@ _EMPLOYMENT_NETWORK_ERROR_PREFIXES = (
 )
 
 
-def _employment_sector_today() -> date:
-    """UTC calendar date; module-level so tests can patch it deterministically."""
-    return datetime.now(timezone.utc).date()
-
-
-def _employment_sector_window(today: date) -> tuple[str, str]:
-    """Inclusive ``[today - 12 months, today]`` window as ISO ``YYYY-MM-DD`` strings."""
-    try:
-        start = today.replace(year=today.year - EMPLOYMENT_SECTOR_LOOKBACK_MONTHS // 12)
-    except ValueError:
-        # Feb 29 in a leap year → clamp to Feb 28 of the prior year.
-        start = today.replace(year=today.year - 1, day=28)
-    return start.isoformat(), today.isoformat()
-
-
 def _clean_employment_value(raw: Any) -> str | None:
     """FRED uses ``"."`` (and occasionally empty strings) for missing values."""
     if not isinstance(raw, str):
@@ -607,8 +590,14 @@ def _clean_employment_value(raw: Any) -> str | None:
     return s
 
 
-def fetch_fred_series(series_id: str, start_date: str, api_key: str) -> dict[str, Any]:
-    """GET FRED ``series/observations`` for one series since ``start_date`` (inclusive).
+def fetch_fred_series(
+    series_id: str,
+    start_date: str,
+    api_key: str,
+    *,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    """GET FRED ``series/observations`` for one series over an inclusive date window.
 
     Returns ``{"observations": [{"date": str, "value": str | None}, ...]}`` on success
     (raw FRED values preserved as strings; ``"."`` → ``None``). On any failure returns
@@ -621,6 +610,8 @@ def fetch_fred_series(series_id: str, start_date: str, api_key: str) -> dict[str
         "observation_start": start_date,
         "sort_order": "asc",
     }
+    if end_date:
+        params["observation_end"] = end_date
     try:
         resp = requests.get(
             FRED_OBSERVATIONS_URL,
@@ -667,22 +658,28 @@ def fetch_fred_series(series_id: str, start_date: str, api_key: str) -> dict[str
 def build_employment_sectors(
     api_key: str,
     *,
-    today: date | None = None,
+    observation_start: str,
+    observation_end: str,
 ) -> tuple[dict[str, Any], bool]:
-    """Parallel fetch of the configured employment sectors over the trailing 12 months.
+    """Parallel fetch of the configured employment sectors over an inclusive FRED window.
 
     Returns ``(payload, all_network_failed)``. ``payload`` matches the documented schema;
     ``all_network_failed`` is true only when **every** series failed with a network-level
     exception (timeout/connection), which the caller surfaces as ``503``.
     """
-    day = today if today is not None else _employment_sector_today()
-    start_date, end_date = _employment_sector_window(day)
+    start_date, end_date = observation_start, observation_end
 
     results: dict[str, dict[str, Any]] = {}
     workers = max(1, len(EMPLOYMENT_SECTOR_SERIES))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(fetch_fred_series, sid, start_date, api_key): sid
+            pool.submit(
+                fetch_fred_series,
+                sid,
+                start_date,
+                api_key,
+                end_date=end_date,
+            ): sid
             for sid, _name in EMPLOYMENT_SECTOR_SERIES
         }
         for fut in concurrent.futures.as_completed(futures):
@@ -694,7 +691,13 @@ def build_employment_sectors(
 
     for sid, name in EMPLOYMENT_SECTOR_SERIES:
         body = results[sid]
-        observations = body.get("observations") or []
+        raw_observations = body.get("observations") or []
+        observations = [
+            obs
+            for obs in raw_observations
+            if isinstance(obs, dict)
+            and _observation_row_in_window(str(obs.get("date", "")), start_date, end_date)
+        ]
         err = body.get("error")
 
         sector_entry: dict[str, Any] = {"name": name, "observations": observations}

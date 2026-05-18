@@ -126,18 +126,41 @@ def economy_sector_dashboard(sector_id: str):
 
 @bp.get("/api/economy/labor/sector")
 def economy_labor_sector():
-    """Trailing-12-month employment level by sector across configured FRED series.
+    """Employment level by sector across configured FRED series.
 
-    Response shape: ``start_date`` / ``end_date`` (window ends today, UTC), ``sectors``
-    keyed by FRED series id (each ``{"name", "observations": [{"date", "value"}]}``,
-    with ``"error"`` when that series failed), and a chart-friendly ``series`` list of
+    Default FRED window is **YTD (UTC)**; optional ``observation_start`` /
+    ``observation_end`` query params (``YYYY-MM-DD``) narrow the range.
+
+    Response shape: ``start_date`` / ``end_date``, ``sectors`` keyed by FRED series id
+    (each ``{"name", "observations": [{"date", "value"}]}``, with ``"error"`` when that
+    series failed), and a chart-friendly ``series`` list of
     ``{"id", "name", "points": [[date, value], ...]}``.
     """
     api_key = os.environ.get(Config.ENV_FRED, "").strip()
     if not api_key:
         return missing_env_key_response(Config.ENV_FRED)
 
-    payload, all_network_failed = build_employment_sectors(api_key)
+    try:
+        obs_start, obs_end = resolve_sector_dashboard_observation_window(
+            request.args.get("observation_start"),
+            request.args.get("observation_end"),
+        )
+    except ValueError as exc:
+        return (
+            jsonify(
+                {
+                    "error": str(exc),
+                    "hint": "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC).",
+                }
+            ),
+            400,
+        )
+
+    payload, all_network_failed = build_employment_sectors(
+        api_key,
+        observation_start=obs_start,
+        observation_end=obs_end,
+    )
     if all_network_failed:
         return jsonify({"error": "FRED API unavailable"}), 503
     return jsonify(payload), 200

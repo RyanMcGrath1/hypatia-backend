@@ -391,8 +391,8 @@ def _employment_scenarios(value_by_series: dict[str, str] | None = None) -> dict
     return {
         sid: {
             "observations": [
-                {"date": "2025-06-01", "value": value_by_series.get(sid, "100")},
-                {"date": "2025-07-01", "value": value_by_series.get(sid, "101")},
+                {"date": "2026-04-01", "value": value_by_series.get(sid, "100")},
+                {"date": "2026-05-01", "value": value_by_series.get(sid, "101")},
             ]
         }
         for sid in _EMPLOYMENT_SECTOR_IDS
@@ -417,21 +417,21 @@ def test_economy_labor_sector_all_series_success(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
-        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["start_date"] == "2025-05-18"
+    assert data["start_date"] == "2026-01-01"
     assert data["end_date"] == "2026-05-18"
     assert set(data["sectors"].keys()) == set(_EMPLOYMENT_SECTOR_IDS)
     payems = data["sectors"]["PAYEMS"]
     assert payems["name"] == "Total Nonfarm Payrolls"
     assert "error" not in payems
-    assert payems["observations"][0] == {"date": "2025-06-01", "value": "100"}
+    assert payems["observations"][0] == {"date": "2026-04-01", "value": "100"}
     series_ids = [s["id"] for s in data["series"]]
     assert series_ids == list(_EMPLOYMENT_SECTOR_IDS)
-    assert data["series"][0]["points"][0] == ["2025-06-01", "100"]
+    assert data["series"][0]["points"][0] == ["2026-04-01", "100"]
 
 
 @responses.activate
@@ -445,7 +445,7 @@ def test_economy_labor_sector_forwards_observation_start_and_api_key(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "secret-key"}),
-        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -454,8 +454,31 @@ def test_economy_labor_sector_forwards_observation_start_and_api_key(client):
         qs = parse_qs(urlparse(call.request.url).query)
         assert qs["api_key"] == ["secret-key"]
         assert qs["file_type"] == ["json"]
-        assert qs["observation_start"] == ["2025-05-18"]
+        assert qs["observation_start"] == ["2026-01-01"]
+        assert qs["observation_end"] == ["2026-05-18"]
         assert qs["series_id"][0] in _EMPLOYMENT_SECTOR_IDS
+
+
+@responses.activate
+def test_economy_labor_sector_custom_observation_window(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_employment_scenarios()),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get(
+            "/api/economy/labor/sector"
+            "?observation_start=2024-06-01&observation_end=2025-12-31"
+        )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["start_date"] == "2024-06-01"
+    assert data["end_date"] == "2025-12-31"
+    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert qs["observation_start"] == ["2024-06-01"]
+    assert qs["observation_end"] == ["2025-12-31"]
 
 
 @responses.activate
@@ -469,7 +492,7 @@ def test_economy_labor_sector_one_series_http_404_partial(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -484,8 +507,8 @@ def test_economy_labor_sector_cleans_missing_value_to_null(client):
     scenarios = {
         sid: {
             "observations": [
-                {"date": "2025-06-01", "value": "."},
-                {"date": "2025-07-01", "value": "101"},
+                {"date": "2026-04-01", "value": "."},
+                {"date": "2026-05-01", "value": "101"},
             ]
         }
         for sid in _EMPLOYMENT_SECTOR_IDS
@@ -499,13 +522,13 @@ def test_economy_labor_sector_cleans_missing_value_to_null(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
     payems = resp.get_json()["sectors"]["PAYEMS"]["observations"]
-    assert payems[0] == {"date": "2025-06-01", "value": None}
-    assert payems[1] == {"date": "2025-07-01", "value": "101"}
+    assert payems[0] == {"date": "2026-04-01", "value": None}
+    assert payems[1] == {"date": "2026-05-01", "value": "101"}
 
 
 def test_economy_labor_sector_returns_503_when_all_network_failed(client):
@@ -516,7 +539,7 @@ def test_economy_labor_sector_returns_503_when_all_network_failed(client):
 
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._employment_sector_today", return_value=fixed_today),
+        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
         patch("economy.fetch_fred_series", side_effect=boom),
     ):
         resp = client.get("/api/economy/labor/sector")
