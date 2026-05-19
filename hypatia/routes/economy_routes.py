@@ -49,8 +49,8 @@ _FRED_OBS_LIMIT_MAX = 10_000
 _PAYEMS_SERIES_ID = "PAYEMS"
 
 
-@bp.get("/api/economy/overview")
-def economy_overview():
+@bp.get("/api/economy/dashboard")
+def economy_dashboard():
     """Economy tab snapshot: recent FRED observations per section (`as_of`, `sections`)."""
     api_key = os.environ.get(Config.ENV_FRED, "").strip()
     if not api_key:
@@ -109,7 +109,9 @@ def economy_sector_dashboard(sector_id: str):
             jsonify(
                 {
                     "error": str(exc),
-                    "hint": "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC).",
+                    "hint": (
+                        "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC)."
+                    ),
                 }
             ),
             400,
@@ -150,7 +152,9 @@ def economy_labor_sector():
             jsonify(
                 {
                     "error": str(exc),
-                    "hint": "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC).",
+                    "hint": (
+                        "Use observation_start / observation_end as YYYY-MM-DD (default: YTD UTC)."
+                    ),
                 }
             ),
             400,

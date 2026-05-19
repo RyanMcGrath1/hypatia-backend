@@ -1,15 +1,18 @@
-"""FRED-backed economy overview aggregation for GET /api/economy/overview routes."""
+"""FRED-backed economy aggregation for GET /api/economy/dashboard and related routes."""
 
 from __future__ import annotations
 
 import concurrent.futures
 import logging
 import math
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
 
 import requests
+
+from hypatia.logging_config import log_upstream
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +150,8 @@ OVERVIEW_SERIES: tuple[EconomyOverviewDef, ...] = (
     ),
 )
 
-# App tab uses short ids in ``GET /api/economy/{id}/dashboard`` (see Hypatia ``SECTOR_ID_TO_OVERVIEW_KEY``).
+# App tab uses short ids in ``GET /api/economy/{id}/dashboard``
+# (see Hypatia ``SECTOR_ID_TO_OVERVIEW_KEY``).
 _ECONOMY_DASHBOARD_SECTOR_ALIASES: dict[str, str] = {
     "consumer": "consumer_spending",
     "rates": "interest_rates",
@@ -157,7 +161,7 @@ _OVERVIEW_SECTION_KEYS: frozenset[str] = frozenset(d.section_key for d in OVERVI
 
 
 def resolve_economy_dashboard_sector(path_segment: str) -> str | None:
-    """Map URL segment (canonical ``section_key`` or app sector id) to ``OVERVIEW_SERIES.section_key``."""
+    """Map URL segment (section key or app alias) to ``OVERVIEW_SERIES.section_key``."""
     key = path_segment.strip().lower()
     if not key:
         return None
@@ -461,7 +465,9 @@ def _fetch_overview_series(
         parsed_all = [
             o
             for o in parsed_all
-            if _observation_row_in_window(str(o.get("date", "")), observation_start, observation_end)
+            if _observation_row_in_window(
+                str(o.get("date", "")), observation_start, observation_end
+            )
         ]
         out_obs = parsed_all
     else:
@@ -572,8 +578,6 @@ EMPLOYMENT_SECTOR_SERIES: tuple[tuple[str, str], ...] = (
     ("USINFO", "Information Sector"),
 )
 
-EMPLOYMENT_SECTOR_NAMES: dict[str, str] = dict(EMPLOYMENT_SECTOR_SERIES)
-
 _EMPLOYMENT_NETWORK_ERROR_PREFIXES = (
     "FRED request timed out",
     "FRED request failed",
@@ -612,6 +616,7 @@ def fetch_fred_series(
     }
     if end_date:
         params["observation_end"] = end_date
+    t0 = time.perf_counter()
     try:
         resp = requests.get(
             FRED_OBSERVATIONS_URL,
@@ -624,6 +629,15 @@ def fetch_fred_series(
     except requests.RequestException as exc:
         logger.warning("FRED sector request failed series_id=%s error=%s", series_id, exc)
         return {"observations": [], "error": f"FRED request failed: {exc!s}"}
+
+    log_upstream(
+        "hypatia.upstream",
+        service="fred",
+        endpoint="series/observations",
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
+    )
 
     if not resp.ok:
         err_msg = f"FRED returned HTTP {resp.status_code}"

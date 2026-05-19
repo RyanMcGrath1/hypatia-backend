@@ -1,6 +1,6 @@
 # hypatia-backend
 
-Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy overview, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
+Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy dashboard, OpenFEC candidate name search proxy, GNews proxy for headlines and search, and health checks).
 
 ## Project layout
 
@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRE
 **API keys**
 
 - `GOOGLE_CIVIC_API_KEY` — Google Cloud; required for `GET /api/civic/divisions-by-address`
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/overview`, `GET /api/economy/<sector>/dashboard`, `GET /api/economy/fred/observations`, `GET /api/economy/fred/series/PAYEMS/delta`)
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/dashboard`, `GET /api/economy/<sector>/dashboard`, `GET /api/economy/labor/sector`, `GET /api/economy/fred/observations`, `GET /api/economy/fred/series/PAYEMS/delta`)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines` and `GET /api/news/search`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/v1/names/candidates` and the alias `GET /api/fec/candidates`
 
@@ -64,14 +64,14 @@ Optional environment variables:
 - `LOG_LEVEL` — Python logging level (default `INFO`; use `DEBUG` for more detail)
 - `LOG_FORMAT` — `text` (default) or `json` (one JSON object per line for log aggregators; **no ANSI colors**)
 - `LOG_COLOR` — `auto` (default): color **text** logs when stderr is a TTY; `always` / `never` to force on or off (use `never` when piping logs to a file)
-- `LOG_QUIET_HEALTH` — when truthy (default `1`), skip access-style log lines for `/health` and `/hello` at INFO; set `LOG_VERBOSE_HEALTH` to log them
+- `LOG_QUIET_HEALTH` — when truthy (default `1`), skip access-style log lines for `/health` at INFO; set `LOG_VERBOSE_HEALTH` to log them
 - `LOG_VERBOSE_HEALTH` — if truthy, log health routes even when quiet health is on (overrides the skip). Truthy values: `1`, `true`, `yes`, `on`
 
 ### Logging
 
 Hypatia’s **text** logs use colors by default on interactive terminals (level, timestamp, logger name, request id). JSON logs stay plain for parsers. Control with **`LOG_COLOR`** (`auto` | `always` | `never`).
 
-Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED failures inside the economy overview builders still log **warnings** with `section_key` / `series_id` only.
+Each request gets a **`X-Request-ID`** (from the incoming `X-Request-ID` header or generated). The same value is returned on the response; CORS **exposes** this header for browser clients. Access logs include method, path, status, and duration (ms). Outbound calls to **GNews**, **Google Civic**, **OpenFEC**, and **FRED** (including the observations proxy) log service name, endpoint label, status, and duration—**never** full URLs, query strings, or API keys. FRED failures inside the economy dashboard builders still log **warnings** with `section_key` / `series_id` only.
 
 Flask’s **Werkzeug** dev-server lines (e.g. `127.0.0.1 - - [date] "GET /..."`) keep their default styling; Hypatia’s application log lines are what `LOG_LEVEL` / `LOG_FORMAT` control.
 
@@ -119,16 +119,14 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Plain text hello |
-| GET | `/hello` | JSON smoke check |
-| GET | `/health` | Same JSON as `/hello` (load balancers) |
+| GET | `/health` | JSON liveness check (load balancers) |
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
-| GET | `/api/economy/overview` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy overview](#economy-overview-apieconomyoverview)) |
-| GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/overview`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. |
+| GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
+| GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
+| GET | `/api/economy/labor/sector` | Employment levels by industry across nine FRED payroll series; JSON has `start_date`, `end_date`, `sectors`, and a chart-friendly `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
-| GET | `/api/economy/labor/sector` | Trailing 12-month employment by sector across nine FRED series; JSON has `start_date`, `end_date`, `sectors`, and a chart-friendly `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)) |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
 | GET | `/api/fec/candidates?...` | Same as `/api/fec/v1/names/candidates` (backward-compatible alias) |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
@@ -138,19 +136,21 @@ If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON 
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
-### Economy overview (`/api/economy/overview`)
+### Economy dashboard (`/api/economy/dashboard`)
 
 Returns **HTTP 200** with:
 
 - `as_of`: ISO-8601 UTC timestamp when the snapshot was built.
 - `sections`: object keyed by section; each value holds recent FRED observations for that overview series (newest first within each section).
 
-If `FRED_API_KEY` is missing, the route returns **503** with `Missing FRED_API_KEY`.
+Optional query: **`observation_end`** (`YYYY-MM-DD`) — forwarded to FRED so all sections share the same vintage window.
+
+If `FRED_API_KEY` is missing, the route returns **503** with `Missing FRED_API_KEY`. The legacy path **`GET /api/economy/overview`** is not registered (returns **404**).
 
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/overview"
+curl -sS "http://127.0.0.1:5001/api/economy/dashboard"
 ```
 
 ### FRED series observations (`/api/economy/fred/observations`)
@@ -181,7 +181,9 @@ curl -sS "http://127.0.0.1:5001/api/economy/fred/series/PAYEMS/delta?limit=72&so
 
 ### Labor employment by sector (`/api/economy/labor/sector`)
 
-Returns the trailing **12 months** of employment levels for a fixed set of FRED series, fetched in parallel.
+Returns employment **levels** (not the unemployment-rate slice from `GET /api/economy/labor/dashboard`) for a fixed set of FRED payroll series, fetched in parallel.
+
+**Default window:** year-to-date in UTC (`Jan 1` through `today`), same as `GET /api/economy/<sector>/dashboard`. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`, inclusive) override; invalid or inverted ranges return **400**.
 
 Series (id → human name):
 
@@ -197,8 +199,7 @@ Series (id → human name):
 
 Response (HTTP 200) shape:
 
-- `start_date` — `today - 12 months` (UTC, ISO `YYYY-MM-DD`), forwarded to FRED as `observation_start`.
-- `end_date` — `today` (UTC).
+- `start_date` / `end_date` — inclusive FRED window (echoed from query params or YTD default), forwarded as `observation_start` / `observation_end`.
 - `sectors` — object keyed by FRED `series_id`. Each value is `{"name", "observations": [{"date", "value"}]}`. FRED's `"."` is converted to `null`; everything else stays as the raw FRED string. On per-series failure the entry also includes `"error": "<message>"` and `"observations": []`.
 - `series` — chart-ready list of `{"id", "name", "points": [[date, value], ...]}` (same data, parallel to `sectors`).
 

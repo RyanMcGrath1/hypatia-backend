@@ -182,7 +182,7 @@ def _should_skip_access_log(path: str) -> bool:
         return False
     if not env_truthy("LOG_QUIET_HEALTH", default=True):
         return False
-    return path in ("/health", "/hello")
+    return path == "/health"
 
 
 def register_request_logging(app: Flask) -> None:
