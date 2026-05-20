@@ -424,14 +424,12 @@ def test_economy_labor_sector_all_series_success(client):
     data = resp.get_json()
     assert data["start_date"] == "2026-01-01"
     assert data["end_date"] == "2026-05-18"
-    assert set(data["sectors"].keys()) == set(_EMPLOYMENT_SECTOR_IDS)
-    payems = data["sectors"]["PAYEMS"]
+    series_ids = [s["id"] for s in data["series"]]
+    assert series_ids == list(_EMPLOYMENT_SECTOR_IDS)
+    payems = data["series"][0]
     assert payems["name"] == "Total Nonfarm Payrolls"
     assert "error" not in payems
     assert payems["observations"][0] == {"date": "2026-04-01", "value": "100"}
-    series_ids = [s["id"] for s in data["series"]]
-    assert series_ids == list(_EMPLOYMENT_SECTOR_IDS)
-    assert data["series"][0]["points"][0] == ["2026-04-01", "100"]
 
 
 @responses.activate
@@ -495,10 +493,10 @@ def test_economy_labor_sector_one_series_http_404_partial(client):
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
-    sectors = resp.get_json()["sectors"]
-    assert sectors["MANEMP"]["error"] == "FRED returned HTTP 404"
-    assert sectors["MANEMP"]["observations"] == []
-    assert "error" not in sectors["PAYEMS"]
+    by_id = {s["id"]: s for s in resp.get_json()["series"]}
+    assert by_id["MANEMP"]["error"] == "FRED returned HTTP 404"
+    assert by_id["MANEMP"]["observations"] == []
+    assert "error" not in by_id["PAYEMS"]
 
 
 @responses.activate
@@ -525,16 +523,74 @@ def test_economy_labor_sector_cleans_missing_value_to_null(client):
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
-    payems = resp.get_json()["sectors"]["PAYEMS"]["observations"]
+    payems = next(s for s in resp.get_json()["series"] if s["id"] == "PAYEMS")["observations"]
     assert payems[0] == {"date": "2026-04-01", "value": None}
     assert payems[1] == {"date": "2026-05-01", "value": "101"}
+
+
+_LABOR_EARNINGS_INFLATION_IDS = ("CES0500000003", "CPIAUCSL")
+
+
+def _earnings_inflation_scenarios() -> dict:
+    return {
+        sid: {
+            "observations": [
+                {"date": "2026-04-01", "value": "35.50" if sid == "CES0500000003" else "320.0"},
+                {"date": "2026-05-01", "value": "35.75" if sid == "CES0500000003" else "322.0"},
+            ]
+        }
+        for sid in _LABOR_EARNINGS_INFLATION_IDS
+    }
+
+
+@responses.activate
+def test_economy_labor_earnings_inflation_success(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_earnings_inflation_scenarios()),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
+        patch(
+            "hypatia.services.economy.core._sector_dashboard_clock_today",
+            return_value=fixed_today,
+        ),
+    ):
+        resp = client.get("/api/economy/labor/earnings-inflation")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [s["id"] for s in data["series"]] == list(_LABOR_EARNINGS_INFLATION_IDS)
+    by_id = {s["id"]: s for s in data["series"]}
+    assert by_id["CES0500000003"]["name"] == "Average Hourly Earnings"
+    assert by_id["CPIAUCSL"]["name"] == "CPI Inflation"
+
+
+@responses.activate
+def test_economy_labor_earnings_inflation_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(
+            _earnings_inflation_scenarios(),
+            http_404_series="CES0500000003",
+        ),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/labor/earnings-inflation")
+    assert resp.status_code == 200
+    by_id = {s["id"]: s for s in resp.get_json()["series"]}
+    assert "error" in by_id["CES0500000003"]
+    assert "error" not in by_id["CPIAUCSL"]
 
 
 def test_economy_labor_sector_returns_503_when_all_network_failed(client):
     empty_payload = {
         "start_date": "2026-01-01",
         "end_date": "2026-05-18",
-        "sectors": {},
         "series": [],
     }
     with (

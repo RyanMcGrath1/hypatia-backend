@@ -126,7 +126,8 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/detail?topic=...` | Premium economy detail screens (`topic`: `gdp`, `labor`, `inflation`, `markets`); JSON has `charts`, `headline`, `as_of` (Expo `economyDetailApi`) |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
-| GET | `/api/economy/labor/sector` | Employment levels by industry across nine FRED payroll series; JSON has `start_date`, `end_date`, `sectors`, and a chart-friendly `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
+| GET | `/api/economy/labor/sector` | Employment levels by industry across nine FRED payroll series; JSON has `start_date`, `end_date`, and `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
+| GET | `/api/economy/labor/earnings-inflation` | `CES0500000003` (average hourly earnings) and `CPIAUCSL` (CPI inflation); same JSON shape as `labor/sector` (see [Labor earnings and CPI](#labor-earnings-and-cpi-apieconomylaborearnings-inflation)) |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
@@ -202,8 +203,7 @@ Series (id → human name):
 Response (HTTP 200) shape:
 
 - `start_date` / `end_date` — inclusive FRED window (echoed from query params or YTD default), forwarded as `observation_start` / `observation_end`.
-- `sectors` — object keyed by FRED `series_id`. Each value is `{"name", "observations": [{"date", "value"}]}`. FRED's `"."` is converted to `null`; everything else stays as the raw FRED string. On per-series failure the entry also includes `"error": "<message>"` and `"observations": []`.
-- `series` — chart-ready list of `{"id", "name", "points": [[date, value], ...]}` (same data, parallel to `sectors`).
+- `series` — ordered list of `{"id", "name", "observations": [{"date", "value"}]}`. FRED's `"."` is converted to `null`; everything else stays as the raw FRED string. On per-series failure the entry also includes `"error": "<message>"` and `"observations": []`.
 
 `FRED_API_KEY` missing → **503** `Missing FRED_API_KEY` (consistent with the other economy routes). When **every** series fails at the network layer (timeout / connection error), the route returns **503** `FRED API unavailable`; otherwise individual failures are surfaced in-band per sector.
 
@@ -211,6 +211,21 @@ Example (port **5001**):
 
 ```bash
 curl -sS "http://127.0.0.1:5001/api/economy/labor/sector"
+```
+
+### Labor earnings and CPI (`/api/economy/labor/earnings-inflation`)
+
+Returns two FRED series in parallel (same response envelope as `labor/sector`):
+
+- `CES0500000003` — Average Hourly Earnings
+- `CPIAUCSL` — CPI Inflation
+
+**Default window:** YTD UTC; optional `observation_start` / `observation_end` (`YYYY-MM-DD`).
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/labor/earnings-inflation"
 ```
 
 ### OpenFEC candidate names (`/api/fec/v1/names/candidates` and `/api/fec/candidates`)

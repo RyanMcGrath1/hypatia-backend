@@ -266,26 +266,20 @@ Same window rules as `{sector}/dashboard` (default **YTD UTC**).
 {
   "start_date": "2026-01-01",
   "end_date": "2026-05-18",
-  "sectors": {
-    "PAYEMS": {
+  "series": [
+    {
+      "id": "PAYEMS",
       "name": "Total Nonfarm Payrolls",
       "observations": [
         { "date": "2026-04-01", "value": "158123" },
         { "date": "2026-05-01", "value": null }
       ]
     }
-  },
-  "series": [
-    {
-      "id": "PAYEMS",
-      "name": "Total Nonfarm Payrolls",
-      "points": [["2026-04-01", "158123"], ["2026-05-01", null]]
-    }
   ]
 }
 ```
 
-**Use `series` for charts** (stable order). Use `sectors` for lookup by FRED id.
+**Use `series`** (ordered list). Lookup by FRED id: `series.find(s => s.id === "PAYEMS")`.
 
 **Values:** string when present; `null` when FRED reported missing (`"."`). Do not treat `null` as zero.
 
@@ -485,23 +479,16 @@ export type SectorDashboardResponse = {
   sections: Record<string, EconomySection>;
 };
 
-export type EmploymentSector = {
-  name: string;
-  observations: SectorObservation[];
-  error?: string;
-};
-
 export type EmploymentSeries = {
   id: string;
   name: string;
-  points: [string, string | null][];
+  observations: SectorObservation[];
   error?: string;
 };
 
 export type LaborSectorResponse = {
   start_date: string;
   end_date: string;
-  sectors: Record<string, EmploymentSector>;
   series: EmploymentSeries[];
 };
 ```

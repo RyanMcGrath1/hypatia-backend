@@ -669,22 +669,23 @@ def fetch_fred_series(
     return {"observations": cleaned}
 
 
-def build_employment_sectors(
+def _build_fred_series_bundle(
     api_key: str,
     *,
     observation_start: str,
     observation_end: str,
+    series_defs: tuple[tuple[str, str], ...],
 ) -> tuple[dict[str, Any], bool]:
-    """Parallel fetch of the configured employment sectors over an inclusive FRED window.
+    """Parallel FRED fetch for a fixed list of ``(series_id, name)`` pairs.
 
-    Returns ``(payload, all_network_failed)``. ``payload`` matches the documented schema;
-    ``all_network_failed`` is true only when **every** series failed with a network-level
-    exception (timeout/connection), which the caller surfaces as ``503``.
+    Returns ``(payload, all_network_failed)`` with ``start_date``, ``end_date``, and ``series``
+    (ordered list of ``{id, name, observations}``). ``all_network_failed`` is true only when
+    every series hit a network-level error (timeout/connection).
     """
     start_date, end_date = observation_start, observation_end
 
     results: dict[str, dict[str, Any]] = {}
-    workers = max(1, len(EMPLOYMENT_SECTOR_SERIES))
+    workers = max(1, len(series_defs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
@@ -694,16 +695,15 @@ def build_employment_sectors(
                 api_key,
                 end_date=end_date,
             ): sid
-            for sid, _name in EMPLOYMENT_SECTOR_SERIES
+            for sid, _name in series_defs
         }
         for fut in concurrent.futures.as_completed(futures):
             results[futures[fut]] = fut.result()
 
-    sectors: dict[str, Any] = {}
     series_list: list[dict[str, Any]] = []
     network_failed = 0
 
-    for sid, name in EMPLOYMENT_SECTOR_SERIES:
+    for sid, name in series_defs:
         body = results[sid]
         raw_observations = body.get("observations") or []
         observations = [
@@ -714,24 +714,60 @@ def build_employment_sectors(
         ]
         err = body.get("error")
 
-        sector_entry: dict[str, Any] = {"name": name, "observations": observations}
-        series_entry: dict[str, Any] = {
+        entry: dict[str, Any] = {
             "id": sid,
             "name": name,
-            "points": [[obs["date"], obs["value"]] for obs in observations],
+            "observations": observations,
         }
         if err:
-            sector_entry["error"] = err
-            series_entry["error"] = err
+            entry["error"] = err
             if err.startswith(_EMPLOYMENT_NETWORK_ERROR_PREFIXES):
                 network_failed += 1
-        sectors[sid] = sector_entry
-        series_list.append(series_entry)
+        series_list.append(entry)
 
     payload = {
         "start_date": start_date,
         "end_date": end_date,
-        "sectors": sectors,
         "series": series_list,
     }
-    return payload, network_failed == len(EMPLOYMENT_SECTOR_SERIES)
+    return payload, network_failed == len(series_defs)
+
+
+def build_employment_sectors(
+    api_key: str,
+    *,
+    observation_start: str,
+    observation_end: str,
+) -> tuple[dict[str, Any], bool]:
+    """Parallel fetch of payroll-by-industry series (``GET /api/economy/labor/sector``)."""
+    return _build_fred_series_bundle(
+        api_key,
+        observation_start=observation_start,
+        observation_end=observation_end,
+        series_defs=EMPLOYMENT_SECTOR_SERIES,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Labor earnings + CPI (GET /api/economy/labor/earnings-inflation)
+# ---------------------------------------------------------------------------
+
+LABOR_EARNINGS_INFLATION_SERIES: tuple[tuple[str, str], ...] = (
+    ("CES0500000003", "Average Hourly Earnings"),
+    ("CPIAUCSL", "CPI Inflation"),
+)
+
+
+def build_labor_earnings_inflation(
+    api_key: str,
+    *,
+    observation_start: str,
+    observation_end: str,
+) -> tuple[dict[str, Any], bool]:
+    """Average hourly earnings and CPI over an inclusive FRED window."""
+    return _build_fred_series_bundle(
+        api_key,
+        observation_start=observation_start,
+        observation_end=observation_end,
+        series_defs=LABOR_EARNINGS_INFLATION_SERIES,
+    )
