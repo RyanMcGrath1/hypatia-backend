@@ -64,7 +64,7 @@ def test_economy_sector_dashboard_missing_fred_key(client):
 
 
 @responses.activate
-@patch("economy._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
+@patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
 def test_economy_sector_dashboard_labor_only_fetches_unrate(_mock_today, client):
     scenarios = {
         "UNRATE": _overview_obs(
@@ -98,7 +98,7 @@ def test_economy_sector_dashboard_labor_only_fetches_unrate(_mock_today, client)
 
 
 @responses.activate
-@patch("economy._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
+@patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
 def test_economy_sector_dashboard_rates_alias_maps_to_interest_rates(_mock_today, client):
     scenarios = {
         "FEDFUNDS": _overview_obs([("2026-03-01", "4.25"), ("2025-12-01", "4.5")]),
@@ -417,7 +417,7 @@ def test_economy_labor_sector_all_series_success(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
-        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
+        patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -445,7 +445,7 @@ def test_economy_labor_sector_forwards_observation_start_and_api_key(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "secret-key"}),
-        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
+        patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -491,7 +491,7 @@ def test_economy_labor_sector_one_series_http_404_partial(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
+        patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -521,7 +521,7 @@ def test_economy_labor_sector_cleans_missing_value_to_null(client):
     fixed_today = date(2026, 5, 18)
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
+        patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=fixed_today),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 200
@@ -531,15 +531,18 @@ def test_economy_labor_sector_cleans_missing_value_to_null(client):
 
 
 def test_economy_labor_sector_returns_503_when_all_network_failed(client):
-    fixed_today = date(2026, 5, 18)
-
-    def boom(*_args, **_kwargs):
-        return {"observations": [], "error": "FRED request failed: boom"}
-
+    empty_payload = {
+        "start_date": "2026-01-01",
+        "end_date": "2026-05-18",
+        "sectors": {},
+        "series": [],
+    }
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
-        patch("economy._sector_dashboard_clock_today", return_value=fixed_today),
-        patch("economy.fetch_fred_series", side_effect=boom),
+        patch(
+            "hypatia.routes.economy.labor_sector.build_employment_sectors",
+            return_value=(empty_payload, True),
+        ),
     ):
         resp = client.get("/api/economy/labor/sector")
     assert resp.status_code == 503
@@ -647,3 +650,44 @@ def test_payems_delta_series_forwards_units_and_sort_order(client):
     assert qs["units"] == ["chg"]
     assert qs["sort_order"] == ["desc"]
     assert qs["limit"] == ["72"]
+
+
+def test_economy_detail_missing_topic_returns_400(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/detail")
+    assert resp.status_code == 400
+
+
+def test_economy_detail_unknown_topic_returns_404(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/detail?topic=widgets")
+    assert resp.status_code == 404
+
+
+@responses.activate
+@patch("hypatia.services.economy.core._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
+def test_economy_detail_labor_returns_charts_and_headline(_mock_today, client):
+    scenarios = {
+        "UNRATE": _overview_obs(
+            [
+                ("2026-03-01", "4.0"),
+                ("2026-02-01", "4.15"),
+            ]
+        ),
+    }
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(scenarios),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/detail?topic=labor")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["topic"] == "labor"
+    assert len(data["charts"]) == 1
+    assert data["charts"][0]["key"] == "labor"
+    assert data["charts"][0]["series_id"] == "UNRATE"
+    assert data["headline"]["value"] == 4.0
+    assert data["headline"]["observation_date"] == "2026-03-01"

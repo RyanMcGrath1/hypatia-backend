@@ -6,13 +6,12 @@ import os
 import time
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import jsonify, request
 
 from hypatia.http import missing_env_key_response
 from hypatia.logging_config import log_upstream
+from hypatia.routes.civic import bp
 from hypatia.settings import Config
-
-bp = Blueprint("civic", __name__)
 
 
 @bp.get("/api/civic/divisions-by-address")

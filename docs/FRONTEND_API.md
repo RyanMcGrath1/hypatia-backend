@@ -36,6 +36,56 @@ Update these calls in the mobile app:
 
 ---
 
+## `GET /api/economy/detail`
+
+**Purpose:** Premium economy section screens (GDP, labor, inflation, markets) — one topic per request.
+
+### Query
+
+| Parameter | Required | Notes |
+|-----------|----------|-------|
+| `topic` | **Yes** | `gdp`, `labor`, `inflation`, or `markets` (`markets` → Fed funds / `interest_rates` section) |
+| `observation_end` | No | `YYYY-MM-DD` — same vintage rules as dashboard routes |
+
+### Response `200`
+
+```json
+{
+  "as_of": "2026-05-18T17:30:00+00:00",
+  "topic": "labor",
+  "charts": [
+    {
+      "key": "labor",
+      "series_id": "UNRATE",
+      "label": "Unemployment Rate",
+      "unit": "percent",
+      "observations": [{ "date": "2026-03-01", "value": 4.0 }]
+    }
+  ],
+  "headline": {
+    "chart_key": "labor",
+    "series_id": "UNRATE",
+    "label": "Unemployment Rate",
+    "unit": "percent",
+    "value": 4.0,
+    "observation_date": "2026-03-01"
+  },
+  "observation_end": "2026-06-01"
+}
+```
+
+Default FRED window when dates are omitted: **YTD UTC** (same as `{sector}/dashboard`).
+
+### Errors
+
+| Status | `error` |
+|--------|---------|
+| 400 | missing/invalid `topic` or `observation_end` |
+| 404 | `Unknown economy detail topic` |
+| 503 | `Missing FRED_API_KEY` |
+
+---
+
 ## Economy routes — do not mix these up
 
 Three different economy resources. The path names are similar; the data is not.
@@ -383,6 +433,7 @@ GET /api/news/search?q=climate&lang=en
 | Path | Response |
 |------|----------|
 | `GET /health` | `200` `{"message": "hello"}` — liveness / load balancers |
+| `GET /hello` | Same response as `/health` (legacy Expo health probe) |
 
 ---
 
@@ -473,8 +524,10 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | Method | Path |
 |--------|------|
 | GET | `/health` |
+| GET | `/hello` (alias) |
 | GET | `/api/civic/divisions-by-address` |
 | GET | `/api/civic/representatives` (410) |
+| GET | `/api/economy/detail` |
 | GET | `/api/economy/dashboard` |
 | GET | `/api/economy/{sector}/dashboard` |
 | GET | `/api/economy/labor/sector` |

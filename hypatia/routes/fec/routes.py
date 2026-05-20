@@ -6,23 +6,18 @@ import os
 import time
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import jsonify, request
 
 from hypatia.http import missing_env_key_response, truthy_query_flag
 from hypatia.logging_config import log_upstream
+from hypatia.routes.fec import bp
 from hypatia.settings import Config
-
-bp = Blueprint("fec", __name__)
 
 
 @bp.get("/api/fec/v1/names/candidates")
 @bp.get("/api/fec/candidates")
 def fec_names_candidates():
-    """Proxy for OpenFEC ``GET /v1/names/candidates/`` (key from env only).
-
-    Query: ``q`` or ``name`` (alias → ``q``). Optional ``page``, ``per_page``
-    (defaults to 5). ``typeahead=1`` uses a shorter timeout for live search UIs.
-    """
+    """Proxy for OpenFEC ``GET /v1/names/candidates/`` (key from env only)."""
     api_key = os.environ.get(Config.ENV_OPENFEC, "").strip()
     if not api_key:
         return missing_env_key_response(Config.ENV_OPENFEC)

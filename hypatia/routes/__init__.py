@@ -1,14 +1,18 @@
-"""Register all URL blueprints on the Flask application."""
+"""Register URL blueprints on the Flask application.
+
+Layout mirrors the Expo app's ``hooks/api/`` modules so each frontend client file
+maps to one backend route package.
+"""
 
 from __future__ import annotations
 
 from flask import Flask
 
 from hypatia.routes.civic import bp as civic_bp
-from hypatia.routes.economy_routes import bp as economy_bp
+from hypatia.routes.economy import bp as economy_bp
 from hypatia.routes.fec import bp as fec_bp
 from hypatia.routes.health import bp as health_bp
-from hypatia.routes.news_routes import bp as news_bp
+from hypatia.routes.news import bp as news_bp
 
 
 def register_blueprints(app: Flask) -> None:

@@ -1,8 +1,8 @@
 """Hypatia Flask application factory and package root.
 
-Blueprints live under ``hypatia.routes``. FRED/GNews client modules remain at the
-repository root (``economy.py``, ``news.py``) to limit churn; they can move under
-this package when you split services or add more shared libraries.
+HTTP handlers live under ``hypatia.routes`` (grouped like Expo ``hooks/api/``).
+Domain logic and upstream clients live under ``hypatia.services``. Root
+``economy.py`` / ``news.py`` re-export services for tests and legacy imports.
 """
 
 from __future__ import annotations

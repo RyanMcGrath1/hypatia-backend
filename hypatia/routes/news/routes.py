@@ -1,21 +1,15 @@
-"""GNews HTTP routes (client logic in ``news`` package module)."""
+"""GNews HTTP routes."""
 
 from __future__ import annotations
 
 import os
 
-from flask import Blueprint, jsonify, request
+from flask import jsonify, request
 
 from hypatia.http import missing_env_key_response
+from hypatia.routes.news import bp
+from hypatia.services.news import SEARCH_PARAMS, build_top_headlines_envelope, fetch_gnews, filter_query_args
 from hypatia.settings import Config
-from news import (
-    SEARCH_PARAMS,
-    build_top_headlines_envelope,
-    fetch_gnews,
-    filter_query_args,
-)
-
-bp = Blueprint("news", __name__)
 
 
 @bp.get("/api/news/top-headlines")

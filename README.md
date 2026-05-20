@@ -9,8 +9,9 @@ Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy dashb
 | [app.py](app.py) | Dev entrypoint: `create_app()` + `python app.py` (re-exports `app` for `flask --app app`). |
 | [wsgi.py](wsgi.py) | WSGI entry: `application = create_app()` for Gunicorn (`wsgi:application` or alias `wsgi:app`). |
 | [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)), [settings](hypatia/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/cors.py), [logging](hypatia/logging_config.py), [HTTP helpers](hypatia/http.py), [JSON error handlers](hypatia/error_handlers.py). |
-| [hypatia/routes/](hypatia/routes/__init__.py) | Flask blueprints (health, civic, FEC, economy, news). |
-| [economy.py](economy.py), [news.py](news.py) | FRED and GNews client logic (root modules; imported by blueprints). |
+| [hypatia/routes/](hypatia/routes/__init__.py) | Flask blueprints grouped like Expo `hooks/api/` (see [docs/API_STRUCTURE.md](docs/API_STRUCTURE.md)). |
+| [hypatia/services/](hypatia/services/) | Domain logic and upstream clients (FRED economy, GNews). |
+| [economy.py](economy.py), [news.py](news.py) | Re-export shims for tests/legacy imports (implementation in `hypatia/services/`). |
 | [pyproject.toml](pyproject.toml) | Project metadata (`requires-python`), Ruff, pytest. |
 | [Dockerfile](Dockerfile) | Minimal production-shaped image (Gunicorn + `HYPATIA_ENV=production`). |
 
@@ -122,6 +123,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/health` | JSON liveness check (load balancers) |
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
+| GET | `/api/economy/detail?topic=...` | Premium economy detail screens (`topic`: `gdp`, `labor`, `inflation`, `markets`); JSON has `charts`, `headline`, `as_of` (Expo `economyDetailApi`) |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
 | GET | `/api/economy/labor/sector` | Employment levels by industry across nine FRED payroll series; JSON has `start_date`, `end_date`, `sectors`, and a chart-friendly `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |

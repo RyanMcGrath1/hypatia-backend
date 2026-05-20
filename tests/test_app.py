@@ -7,6 +7,12 @@ def test_health_returns_ok_json(client) -> None:
     assert response.get_json() == {"message": "hello"}
 
 
+def test_hello_alias_matches_health(client) -> None:
+    response = client.get("/hello")
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "hello"}
+
+
 def test_unknown_path_returns_json_not_found(client) -> None:
     response = client.get("/no/such/route")
     assert response.status_code == 404
