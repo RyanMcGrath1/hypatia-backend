@@ -568,6 +568,9 @@ def build_economy_overview_sector(
 # ``CES*0000000001`` codes are BLS-style but are not valid ``series_id`` values on FRED.
 EMPLOYMENT_SECTOR_SERIES: tuple[tuple[str, str], ...] = (
     ("PAYEMS", "Total Nonfarm Payrolls"),
+    ("USPRIV", "Total Private"),
+    ("USGOOD", "Goods-Producing"),
+    ("SRVPRD", "Service-Providing"),
     ("USPBS", "Professional & Business Services"),
     ("USEHS", "Education & Health Services"),
     ("USLAH", "Leisure & Hospitality"),
@@ -575,7 +578,11 @@ EMPLOYMENT_SECTOR_SERIES: tuple[tuple[str, str], ...] = (
     ("MANEMP", "Manufacturing"),
     ("USFIRE", "Financial Activities"),
     ("USCONS", "Construction"),
-    ("USINFO", "Information Sector"),
+    ("USINFO", "Information"),
+    ("USGOVT", "Government"),
+    ("CES4300000001", "Transportation & Warehousing"),
+    ("USWTRADE", "Wholesale Trade"),
+    ("USMINE", "Mining & Logging"),
 )
 
 _EMPLOYMENT_NETWORK_ERROR_PREFIXES = (

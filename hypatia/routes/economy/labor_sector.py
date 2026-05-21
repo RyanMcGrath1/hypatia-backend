@@ -11,7 +11,7 @@ from hypatia.services.economy import build_employment_sectors
 
 @bp.get("/api/economy/labor/sector")
 def economy_labor_sector():
-    """Employment levels by industry (nine FRED payroll series)."""
+    """Employment levels by industry (sixteen FRED payroll series)."""
     api_key, err = fred_api_key_or_response()
     if err:
         return err

@@ -375,6 +375,9 @@ def test_economy_overview_one_series_http_error(client):
 
 _EMPLOYMENT_SECTOR_IDS = (
     "PAYEMS",
+    "USPRIV",
+    "USGOOD",
+    "SRVPRD",
     "USPBS",
     "USEHS",
     "USLAH",
@@ -383,6 +386,10 @@ _EMPLOYMENT_SECTOR_IDS = (
     "USFIRE",
     "USCONS",
     "USINFO",
+    "USGOVT",
+    "CES4300000001",
+    "USWTRADE",
+    "USMINE",
 )
 
 

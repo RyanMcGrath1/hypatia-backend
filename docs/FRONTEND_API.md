@@ -290,6 +290,9 @@ Same window rules as `{sector}/dashboard` (default **YTD UTC**).
 | `id` | `name` |
 |------|--------|
 | `PAYEMS` | Total Nonfarm Payrolls |
+| `USPRIV` | Total Private |
+| `USGOOD` | Goods-Producing |
+| `SRVPRD` | Service-Providing |
 | `USPBS` | Professional & Business Services |
 | `USEHS` | Education & Health Services |
 | `USLAH` | Leisure & Hospitality |
@@ -297,7 +300,11 @@ Same window rules as `{sector}/dashboard` (default **YTD UTC**).
 | `MANEMP` | Manufacturing |
 | `USFIRE` | Financial Activities |
 | `USCONS` | Construction |
-| `USINFO` | Information Sector |
+| `USINFO` | Information |
+| `USGOVT` | Government |
+| `CES4300000001` | Transportation & Warehousing |
+| `USWTRADE` | Wholesale Trade |
+| `USMINE` | Mining & Logging |
 
 ### Errors
 

@@ -126,7 +126,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/detail?topic=...` | Premium economy detail screens (`topic`: `gdp`, `labor`, `inflation`, `markets`); JSON has `charts`, `headline`, `as_of` (Expo `economyDetailApi`) |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
-| GET | `/api/economy/labor/sector` | Employment levels by industry across nine FRED payroll series; JSON has `start_date`, `end_date`, and `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
+| GET | `/api/economy/labor/sector` | Employment levels across sixteen FRED payroll series; JSON has `start_date`, `end_date`, and `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
 | GET | `/api/economy/labor/earnings-inflation` | `CES0500000003` (average hourly earnings) and `CPIAUCSL` (CPI inflation); same JSON shape as `labor/sector` (see [Labor earnings and CPI](#labor-earnings-and-cpi-apieconomylaborearnings-inflation)) |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
@@ -188,9 +188,12 @@ Returns employment **levels** (not the unemployment-rate slice from `GET /api/ec
 
 **Default window:** year-to-date in UTC (`Jan 1` through `today`), same as `GET /api/economy/<sector>/dashboard`. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`, inclusive) override; invalid or inverted ranges return **400**.
 
-Series (id → human name):
+Series (id → human name, response order):
 
 - `PAYEMS` — Total Nonfarm Payrolls
+- `USPRIV` — Total Private
+- `USGOOD` — Goods-Producing
+- `SRVPRD` — Service-Providing
 - `USPBS` — Professional & Business Services
 - `USEHS` — Education & Health Services
 - `USLAH` — Leisure & Hospitality
@@ -198,7 +201,11 @@ Series (id → human name):
 - `MANEMP` — Manufacturing
 - `USFIRE` — Financial Activities
 - `USCONS` — Construction
-- `USINFO` — Information Sector
+- `USINFO` — Information
+- `USGOVT` — Government
+- `CES4300000001` — Transportation & Warehousing
+- `USWTRADE` — Wholesale Trade
+- `USMINE` — Mining & Logging
 
 Response (HTTP 200) shape:
 
