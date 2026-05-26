@@ -10,6 +10,7 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 | `flaskMainApi.ts` | `hypatia/routes/economy/dashboard.py` | `/api/economy/dashboard`, `/api/economy/<sector>/dashboard` |
 | `economyDetailApi.ts` | `hypatia/routes/economy/detail.py` | `/api/economy/detail` |
 | `economySectorApi.ts` | `hypatia/routes/economy/labor_sector.py` | `/api/economy/labor/sector` |
+| (labor age charts) | `hypatia/routes/economy/labor_age_metrics.py` | `/api/economy/labor/age-metrics` |
 | `fredObservations.ts` | `hypatia/routes/economy/fred.py` | `/api/economy/fred/*` |
 | `newsApi.ts` | `hypatia/routes/news/` | `/api/news/*` |
 | `fecCandidatesApi.ts` | `hypatia/routes/fec/` | `/api/fec/candidates`, `/api/fec/v1/names/candidates` |
@@ -20,6 +21,7 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 | Service module | Role |
 |----------------|------|
 | `hypatia/services/economy/core.py` | FRED overview, sector dashboards, payroll-by-industry |
+| `hypatia/services/economy/labor_age_metrics.py` | Unemployment / participation / emp-pop by age |
 | `hypatia/services/economy/detail.py` | Premium detail payload (`topic`, `charts`, `headline`) |
 | `hypatia/services/news/core.py` | GNews fetch + top-headlines pagination envelope |
 

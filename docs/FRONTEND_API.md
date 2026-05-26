@@ -525,6 +525,8 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | GET | `/api/economy/dashboard` |
 | GET | `/api/economy/{sector}/dashboard` |
 | GET | `/api/economy/labor/sector` |
+| GET | `/api/economy/labor/age-metrics` |
+| GET | `/api/economy/labor/earnings-inflation` |
 | GET | `/api/economy/fred/observations` |
 | GET | `/api/economy/fred/series/PAYEMS/delta` |
 | GET | `/api/fec/candidates` |

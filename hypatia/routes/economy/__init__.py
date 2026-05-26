@@ -10,6 +10,7 @@ from hypatia.routes.economy import (  # noqa: E402, F401
     dashboard,
     detail,
     fred,
+    labor_age_metrics,
     labor_earnings_inflation,
     labor_sector,
 )

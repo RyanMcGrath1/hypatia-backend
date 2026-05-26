@@ -594,6 +594,135 @@ def test_economy_labor_earnings_inflation_one_series_fails(client):
     assert "error" not in by_id["CPIAUCSL"]
 
 
+_LABOR_AGE_METRIC_FRED_IDS = (
+    "LNS14000012",
+    "LNS14000036",
+    "LNS14000060",
+    "LNS14024230",
+    "LNS11300012",
+    "LNS11300036",
+    "LNS11300060",
+    "LNS11324230",
+    "LNS12300012",
+    "LNS12300060",
+    # 20-24 and 55+ emp-pop ratios are derived from level series (not on FRED).
+    "LNS12000036",
+    "LNU00000036",
+    "LNS12024230",
+    "LNU00024230",
+)
+
+
+def _labor_age_metrics_scenarios() -> dict:
+    scenarios = {
+        sid: {
+            "observations": [
+                {"date": "2026-04-01", "value": "5.0"},
+                {"date": "2026-05-01", "value": "5.1"},
+            ]
+        }
+        for sid in _LABOR_AGE_METRIC_FRED_IDS
+    }
+    # Derived 55+ emp-pop: 37810 / 105140 * 100 ≈ 36.0
+    scenarios["LNS12024230"]["observations"] = [{"date": "2026-04-01", "value": "37810"}]
+    scenarios["LNU00024230"]["observations"] = [{"date": "2026-04-01", "value": "105140"}]
+    return scenarios
+
+
+@responses.activate
+def test_economy_labor_age_metrics_success(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_labor_age_metrics_scenarios()),
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
+        patch(
+            "hypatia.services.economy.core._sector_dashboard_clock_today",
+            return_value=fixed_today,
+        ),
+    ):
+        resp = client.get("/api/economy/labor/age-metrics")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["start_date"] == "2026-01-01"
+    assert data["end_date"] == "2026-05-18"
+    assert [m["id"] for m in data["metrics"]] == [
+        "unemployment_rate",
+        "labor_force_participation",
+        "employment_population_ratio",
+    ]
+    unemployment = data["metrics"][0]
+    assert unemployment["name"] == "Unemployment Rate"
+    assert [s["age_group"] for s in unemployment["series"]] == ["16-19", "20-24", "25-54", "55+"]
+    assert unemployment["series"][0]["id"] == "LNS14000012"
+    assert unemployment["series"][0]["observations"][0] == {"date": "2026-04-01", "value": "5.0"}
+    emp_pop = next(m for m in data["metrics"] if m["id"] == "employment_population_ratio")
+    ratio_55 = next(s for s in emp_pop["series"] if s["age_group"] == "55+")
+    assert ratio_55["id"] == "LNS12324230"
+    assert "error" not in ratio_55
+    assert len(responses.calls) == len(_LABOR_AGE_METRIC_FRED_IDS)
+
+
+@responses.activate
+def test_economy_labor_age_metrics_custom_window(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_labor_age_metrics_scenarios()),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get(
+            "/api/economy/labor/age-metrics?observation_start=2024-06-01&observation_end=2025-12-31"
+        )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["start_date"] == "2024-06-01"
+    assert data["end_date"] == "2025-12-31"
+    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert qs["observation_start"] == ["2024-06-01"]
+    assert qs["observation_end"] == ["2025-12-31"]
+
+
+@responses.activate
+def test_economy_labor_age_metrics_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(
+            _labor_age_metrics_scenarios(),
+            http_404_series="LNS14000012",
+        ),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/labor/age-metrics")
+    assert resp.status_code == 200
+    unemployment = resp.get_json()["metrics"][0]["series"]
+    by_id = {s["id"]: s for s in unemployment}
+    assert by_id["LNS14000012"]["error"] == "FRED returned HTTP 404"
+    assert "error" not in by_id["LNS14000036"]
+
+
+@responses.activate
+def test_economy_labor_age_metrics_derives_emp_pop_55_plus(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_labor_age_metrics_scenarios()),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/labor/age-metrics")
+    emp_pop = next(m for m in resp.get_json()["metrics"] if m["id"] == "employment_population_ratio")
+    ratio_55 = next(s for s in emp_pop["series"] if s["age_group"] == "55+")
+    assert ratio_55["observations"][0] == {"date": "2026-04-01", "value": "36.0"}
+
+
 def test_economy_labor_sector_returns_503_when_all_network_failed(client):
     empty_payload = {
         "start_date": "2026-01-01",

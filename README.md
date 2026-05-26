@@ -128,6 +128,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
 | GET | `/api/economy/labor/sector` | Employment levels across sixteen FRED payroll series; JSON has `start_date`, `end_date`, and `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
 | GET | `/api/economy/labor/earnings-inflation` | `CES0500000003` (average hourly earnings) and `CPIAUCSL` (CPI inflation); same JSON shape as `labor/sector` (see [Labor earnings and CPI](#labor-earnings-and-cpi-apieconomylaborearnings-inflation)) |
+| GET | `/api/economy/labor/age-metrics` | Unemployment, labor force participation, and employment-population ratio by age cohort (12 FRED `LNS*` series); see [Labor age metrics](#labor-age-metrics-apieconomylaborage-metrics) |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
 | GET | `/api/fec/v1/names/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only; alias path below |
@@ -233,6 +234,30 @@ Example:
 
 ```bash
 curl -sS "http://127.0.0.1:5001/api/economy/labor/earnings-inflation"
+```
+
+### Labor age metrics (`/api/economy/labor/age-metrics`)
+
+Returns three BLS labor indicators, each broken out by age group (16–19, 20–24, 25–54, 55+), fetched in parallel from FRED:
+
+| Metric | FRED series (by age order above) |
+|--------|----------------------------------|
+| Unemployment rate | `LNS14000012`, `LNS14000036`, `LNS14000060`, `LNS14024230` |
+| Labor force participation | `LNS11300012`, `LNS11300036`, `LNS11300060`, `LNS11324230` |
+| Employment-population ratio | `LNS12300012`, `LNS12300060` (direct); `LNS12300036` / `LNS12324230` computed from employment ÷ population levels (`LNS120*` / `LNU000*`) because FRED does not publish those ratio series |
+
+**Default window:** YTD UTC; optional `observation_start` / `observation_end` (`YYYY-MM-DD`).
+
+Response (HTTP 200):
+
+- `start_date` / `end_date` — inclusive FRED window.
+- `metrics` — ordered list of `{"id", "name", "series": [{"id", "age_group", "observations": [...]}]}`. Per-series `"error"` when FRED fails for that id only.
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/labor/age-metrics"
+curl -sS "http://127.0.0.1:5001/api/economy/labor/age-metrics?observation_start=2024-01-01&observation_end=2024-12-31"
 ```
 
 ### OpenFEC candidate names (`/api/fec/v1/names/candidates` and `/api/fec/candidates`)
