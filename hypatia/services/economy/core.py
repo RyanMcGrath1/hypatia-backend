@@ -756,6 +756,109 @@ def build_employment_sectors(
 
 
 # ---------------------------------------------------------------------------
+# Recent CPI (GET /api/economy/cpi)
+# ---------------------------------------------------------------------------
+
+CPI_SERIES_ID = "CPIAUCSL"
+CPI_SERIES_LABEL = "Consumer Price Index for All Urban Consumers: All Items"
+CPI_SERIES_UNIT = "index"
+CPI_RECENT_MONTHS = 5
+
+
+def build_cpi_recent(api_key: str) -> tuple[dict[str, Any], int]:
+    """Last ``CPI_RECENT_MONTHS`` monthly CPIAUCSL observations (newest first).
+
+    Returns ``(json_body, http_status)``. On success the body includes ``as_of``,
+    ``series_id``, ``label``, ``unit``, and ``observations``.
+    """
+    as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    params: dict[str, str] = {
+        "series_id": CPI_SERIES_ID,
+        "api_key": api_key,
+        "file_type": "json",
+        "sort_order": "desc",
+        "limit": str(CPI_RECENT_MONTHS),
+    }
+    t0 = time.perf_counter()
+    try:
+        resp = requests.get(
+            FRED_OBSERVATIONS_URL,
+            params=params,
+            timeout=FRED_REQUEST_TIMEOUT,
+        )
+    except requests.Timeout:
+        logger.warning("FRED CPI recent request timed out series_id=%s", CPI_SERIES_ID)
+        return {"error": "FRED request timed out"}, 503
+    except requests.RequestException as exc:
+        logger.warning(
+            "FRED CPI recent request failed series_id=%s error=%s",
+            CPI_SERIES_ID,
+            exc,
+        )
+        return {"error": "FRED API unavailable"}, 503
+
+    log_upstream(
+        "hypatia.upstream",
+        service="fred",
+        endpoint="series/observations",
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
+    )
+
+    if not resp.ok:
+        err_msg = f"FRED returned HTTP {resp.status_code}"
+        try:
+            err_body = resp.json()
+            if isinstance(err_body.get("error_message"), str):
+                err_msg = err_body["error_message"]
+        except ValueError:
+            pass
+        status = 502 if resp.status_code >= 500 else resp.status_code
+        return {"error": err_msg}, status
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {"error": "Invalid JSON from FRED"}, 502
+
+    raw_obs = payload.get("observations")
+    if not isinstance(raw_obs, list) or not raw_obs:
+        return {"error": "No observations in FRED response"}, 502
+
+    observations: list[dict[str, Any]] = []
+    for row in raw_obs:
+        if len(observations) >= CPI_RECENT_MONTHS:
+            break
+        if not isinstance(row, dict):
+            continue
+        d = str(row.get("date", "")).strip()
+        if not d:
+            continue
+        raw_v = str(row.get("value", "")).strip()
+        observations.append(
+            {
+                "date": d,
+                "value": _parse_observation_value(raw_v),
+            }
+        )
+
+    if not observations:
+        return {"error": "No usable observations in FRED response"}, 502
+
+    return (
+        {
+            "as_of": as_of,
+            "series_id": CPI_SERIES_ID,
+            "label": CPI_SERIES_LABEL,
+            "unit": CPI_SERIES_UNIT,
+            "observations": observations,
+        },
+        200,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Labor earnings + CPI (GET /api/economy/labor/earnings-inflation)
 # ---------------------------------------------------------------------------
 

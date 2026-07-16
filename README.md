@@ -123,6 +123,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/health` | JSON liveness check (load balancers) |
 | GET | `/api/civic/divisions-by-address?address=...` | Proxies [Google Civic `divisionsByAddress`](https://developers.google.com/civic-information/docs/v2/divisions/divisionsByAddress) (OCD division IDs for an address) |
 | GET | `/api/civic/representatives?...` | **410 Gone** — Google removed the Representatives API in 2025; use `/api/civic/divisions-by-address` instead |
+| GET | `/api/economy/cpi` | Last 5 months of FRED ``CPIAUCSL`` (Consumer Price Index), newest first; JSON has `as_of`, `series_id`, `label`, `unit`, `observations` |
 | GET | `/api/economy/detail?topic=...` | Premium economy detail screens (`topic`: `gdp`, `labor`, `inflation`, `markets`); JSON has `charts`, `headline`, `as_of` (Expo `economyDetailApi`) |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
@@ -139,6 +140,25 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 If `GOOGLE_CIVIC_API_KEY` is missing, the civic route returns `503` with a JSON body whose `error` is `Missing GOOGLE_CIVIC_API_KEY`. **Fix:** put the key in `.env` at the **repository root** (same directory as `app.py`), then **fully stop and restart** the Flask process (debug mode’s reloader still needs a restart after you first create `.env`). Economy routes that need FRED return **503** with `Missing FRED_API_KEY` when `FRED_API_KEY` is unset. News routes return **503** with `Missing GNEWS_API_KEY` when `GNEWS_API_KEY` is unset. OpenFEC routes return **503** with `Missing OPENFEC_API_KEY` when `OPENFEC_API_KEY` is unset.
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
+
+### Recent CPI (`/api/economy/cpi`)
+
+Returns the **5 most recent** monthly observations for FRED series **`CPIAUCSL`** (Consumer Price Index for All Urban Consumers: All Items), newest first.
+
+Response (HTTP 200):
+
+- `as_of` — ISO-8601 UTC timestamp when the snapshot was built
+- `series_id` — always `CPIAUCSL`
+- `label` / `unit` — display metadata (`index`)
+- `observations` — up to 5 `{date, value}` rows (`value` is numeric when FRED returns a number; `"."` for missing)
+
+Missing `FRED_API_KEY` → **503**. Upstream FRED errors are forwarded (e.g. **429**).
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/cpi"
+```
 
 ### Economy dashboard (`/api/economy/dashboard`)
 

@@ -883,3 +883,65 @@ def test_economy_detail_labor_returns_charts_and_headline(_mock_today, client):
     assert data["charts"][0]["series_id"] == "UNRATE"
     assert data["headline"]["value"] == 4.0
     assert data["headline"]["observation_date"] == "2026-03-01"
+
+
+def test_economy_cpi_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/cpi")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_cpi_returns_last_five_months(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        captured["series_id"] = qs.get("series_id", [])
+        captured["limit"] = qs.get("limit", [])
+        captured["sort_order"] = qs.get("sort_order", [])
+        body = {
+            "observations": [
+                {"date": "2026-05-01", "value": "322.1"},
+                {"date": "2026-04-01", "value": "321.0"},
+                {"date": "2026-03-01", "value": "319.8"},
+                {"date": "2026-02-01", "value": "318.5"},
+                {"date": "2026-01-01", "value": "317.2"},
+            ]
+        }
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/cpi")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert captured["series_id"] == ["CPIAUCSL"]
+    assert captured["limit"] == ["5"]
+    assert captured["sort_order"] == ["desc"]
+    assert data["series_id"] == "CPIAUCSL"
+    assert data["unit"] == "index"
+    assert "as_of" in data
+    assert len(data["observations"]) == 5
+    assert data["observations"][0] == {"date": "2026-05-01", "value": 322.1}
+    assert data["observations"][-1] == {"date": "2026-01-01", "value": 317.2}
+
+
+@responses.activate
+def test_economy_cpi_fred_http_error(client):
+    responses.add(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        json={"error_message": "Too Many Requests.  Exceeded Rate Limit"},
+        status=429,
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/cpi")
+    assert resp.status_code == 429
+    assert "Too Many Requests" in resp.get_json()["error"]

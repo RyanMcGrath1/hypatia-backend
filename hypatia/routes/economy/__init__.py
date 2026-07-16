@@ -7,6 +7,7 @@ from flask import Blueprint
 bp = Blueprint("economy", __name__)
 
 from hypatia.routes.economy import (  # noqa: E402, F401
+    cpi,
     dashboard,
     detail,
     fred,
