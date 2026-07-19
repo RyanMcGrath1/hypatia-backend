@@ -99,6 +99,7 @@ def _fetch_fred_pc1_latest(api_key: str, series_id: str) -> dict[str, Any]:
     if not isinstance(raw_obs, list) or not raw_obs:
         return {"error": "No observations in FRED response"}
 
+    collected: list[tuple[str, float]] = []
     for row in raw_obs:
         if not isinstance(row, dict):
             continue
@@ -108,9 +109,21 @@ def _fetch_fred_pc1_latest(api_key: str, series_id: str) -> dict[str, Any]:
         value = _parse_pc1_value(row.get("value"))
         if value is None:
             continue
-        return {"value": round(value, 2), "observation_date": d}
+        collected.append((d, round(value, 2)))
+        if len(collected) >= PCE_YOY_FETCH_LIMIT:
+            break
 
-    return {"error": "No usable observations in FRED response"}
+    if not collected:
+        return {"error": "No usable observations in FRED response"}
+
+    out: dict[str, Any] = {
+        "value": collected[0][1],
+        "observation_date": collected[0][0],
+    }
+    if len(collected) >= 2:
+        out["previous_value"] = collected[1][1]
+        out["previous_observation_date"] = collected[1][0]
+    return out
 
 
 def _metric_payload(

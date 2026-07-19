@@ -367,6 +367,97 @@ GET /api/economy/inflation/pce-vs-target
 
 ---
 
+## `GET /api/economy/inflation/cpi-components`
+
+**Purpose:** Headline CPI and component year-over-year inflation for the inflation detail “CPI components” widget.
+
+Fetches FRED `CPIAUCSL` plus five BLS CPI component indexes with `units=pc1` (percent change from year ago). All series are seasonally adjusted. Shelter is nested inside core services; the response includes `includes_in: ["core_services"]` on the shelter entry so the UI can show that overlap.
+
+| Component key | FRED series | Label |
+|---------------|-------------|-------|
+| *(headline)* | `CPIAUCSL` | Headline CPI |
+| `shelter` | `CUSR0000SAH1` | Shelter |
+| `food` | `CPIUFDSL` | Food |
+| `energy` | `CPIENGSL` | Energy |
+| `core_goods` | `CUSR0000SACL1E` | Core Goods |
+| `core_services` | `CUSR0000SASLE` | Core Services |
+
+### Response `200`
+
+```json
+{
+  "as_of": "2026-07-18T02:00:00+00:00",
+  "observation_date": "2026-06-01",
+  "headline": {
+    "series_id": "CPIAUCSL",
+    "label": "Headline CPI",
+    "value": 3.5,
+    "observation_date": "2026-06-01",
+    "previous_value": 3.2,
+    "previous_observation_date": "2026-05-01",
+    "delta": 0.3
+  },
+  "components": [
+    {
+      "key": "shelter",
+      "series_id": "CUSR0000SAH1",
+      "label": "Shelter",
+      "value": 3.3,
+      "observation_date": "2026-06-01",
+      "previous_value": 3.1,
+      "previous_observation_date": "2026-05-01",
+      "delta": 0.2,
+      "includes_in": ["core_services"]
+    },
+    {
+      "key": "food",
+      "series_id": "CPIUFDSL",
+      "label": "Food",
+      "value": 3.0,
+      "observation_date": "2026-06-01"
+    },
+    {
+      "key": "energy",
+      "series_id": "CPIENGSL",
+      "label": "Energy",
+      "value": 15.7,
+      "observation_date": "2026-06-01"
+    },
+    {
+      "key": "core_goods",
+      "series_id": "CUSR0000SACL1E",
+      "label": "Core Goods",
+      "value": 0.8,
+      "observation_date": "2026-06-01"
+    },
+    {
+      "key": "core_services",
+      "series_id": "CUSR0000SASLE",
+      "label": "Core Services",
+      "value": 3.2,
+      "observation_date": "2026-06-01"
+    }
+  ]
+}
+```
+
+Per-metric `"error"` is included when that FRED fetch fails; numeric fields are then `null`. Each metric includes latest YoY % (`value`), prior month YoY % (`previous_value`), and the change in the YoY rate in percentage points (`delta`).
+
+### Errors
+
+| Status | `error` |
+|--------|---------|
+| 503 | `Missing FRED_API_KEY` |
+| 503 | `FRED API unavailable` (all series failed at network layer) |
+
+### Example
+
+```http
+GET /api/economy/inflation/cpi-components
+```
+
+---
+
 ## `GET /api/economy/fred/observations`
 
 **Purpose:** Thin FRED proxy for custom series.
@@ -572,6 +663,7 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | GET | `/api/economy/labor/age-metrics` |
 | GET | `/api/economy/labor/earnings-inflation` |
 | GET | `/api/economy/inflation/pce-vs-target` |
+| GET | `/api/economy/inflation/cpi-components` |
 | GET | `/api/economy/fred/observations` |
 | GET | `/api/economy/fred/series/PAYEMS/delta` |
 | GET | `/api/fec/candidates` |
