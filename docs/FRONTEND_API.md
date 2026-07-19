@@ -323,6 +323,50 @@ GET /api/economy/labor/sector?observation_start=2024-06-01&observation_end=2025-
 
 ---
 
+## `GET /api/economy/inflation/pce-vs-target`
+
+**Purpose:** Headline and core PCE year-over-year inflation vs the Fed’s 2% target (inflation detail “PCE vs target” widget).
+
+Fetches FRED `PCEPI` and `PCEPILFE` with `units=pc1` (percent change from year ago). The target is returned as a constant (`2.0`); it is not a FRED series.
+
+### Response `200`
+
+```json
+{
+  "as_of": "2026-05-18T17:30:00+00:00",
+  "target": 2.0,
+  "headline": {
+    "series_id": "PCEPI",
+    "label": "PCE Headline",
+    "value": 2.4,
+    "observation_date": "2026-05-01"
+  },
+  "core": {
+    "series_id": "PCEPILFE",
+    "label": "Core PCE",
+    "value": 2.8,
+    "observation_date": "2026-05-01"
+  }
+}
+```
+
+Per-metric `"error"` is included when that FRED fetch fails; `value` and `observation_date` are then `null`.
+
+### Errors
+
+| Status | `error` |
+|--------|---------|
+| 503 | `Missing FRED_API_KEY` |
+| 503 | `FRED API unavailable` (both series failed at network layer) |
+
+### Example
+
+```http
+GET /api/economy/inflation/pce-vs-target
+```
+
+---
+
 ## `GET /api/economy/fred/observations`
 
 **Purpose:** Thin FRED proxy for custom series.
@@ -527,6 +571,7 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | GET | `/api/economy/labor/sector` |
 | GET | `/api/economy/labor/age-metrics` |
 | GET | `/api/economy/labor/earnings-inflation` |
+| GET | `/api/economy/inflation/pce-vs-target` |
 | GET | `/api/economy/fred/observations` |
 | GET | `/api/economy/fred/series/PAYEMS/delta` |
 | GET | `/api/fec/candidates` |

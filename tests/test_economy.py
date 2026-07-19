@@ -10,6 +10,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import requests
 import responses
 
 
@@ -945,3 +946,101 @@ def test_economy_cpi_fred_http_error(client):
         resp = client.get("/api/economy/cpi")
     assert resp.status_code == 429
     assert "Too Many Requests" in resp.get_json()["error"]
+
+
+_PCE_VS_TARGET_IDS = ("PCEPI", "PCEPILFE")
+
+
+def _pce_vs_target_scenarios() -> dict:
+    return {
+        "PCEPI": {"observations": [{"date": "2026-05-01", "value": "2.40"}]},
+        "PCEPILFE": {"observations": [{"date": "2026-05-01", "value": "2.80"}]},
+    }
+
+
+@responses.activate
+def test_economy_inflation_pce_vs_target_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/inflation/pce-vs-target")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_inflation_pce_vs_target_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("units", []).append((qs.get("units") or [""])[0])
+        captured.setdefault("sort_order", []).append((qs.get("sort_order") or [""])[0])
+        captured.setdefault("limit", []).append((qs.get("limit") or [""])[0])
+        body = _pce_vs_target_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/inflation/pce-vs-target")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_PCE_VS_TARGET_IDS)
+    assert captured["units"] == ["pc1", "pc1"]
+    assert captured["sort_order"] == ["desc", "desc"]
+    assert captured["limit"] == ["2", "2"]
+    assert data["target"] == 2.0
+    assert "as_of" in data
+    assert data["headline"] == {
+        "series_id": "PCEPI",
+        "label": "PCE Headline",
+        "value": 2.4,
+        "observation_date": "2026-05-01",
+    }
+    assert data["core"] == {
+        "series_id": "PCEPILFE",
+        "label": "Core PCE",
+        "value": 2.8,
+        "observation_date": "2026-05-01",
+    }
+
+
+@responses.activate
+def test_economy_inflation_pce_vs_target_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_pce_vs_target_scenarios(), http_404_series="PCEPI"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/inflation/pce-vs-target")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["headline"]["value"] is None
+    assert "error" in data["headline"]
+    assert data["core"]["value"] == 2.8
+
+
+@responses.activate
+def test_economy_inflation_pce_vs_target_all_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/inflation/pce-vs-target")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
