@@ -1046,6 +1046,244 @@ def test_economy_inflation_pce_vs_target_all_network_failed(client):
     assert resp.get_json()["error"] == "FRED API unavailable"
 
 
+_FED_FUNDS_TARGET_IDS = ("DFEDTARL", "DFEDTARU")
+
+
+def _fed_funds_target_scenarios() -> dict:
+    return {
+        sid: {
+            "observations": [
+                {"date": "2026-01-15", "value": "4.25" if sid == "DFEDTARU" else "4.00"},
+                {"date": "2026-03-01", "value": "4.00" if sid == "DFEDTARU" else "3.75"},
+                {"date": "2026-05-01", "value": "3.75" if sid == "DFEDTARU" else "3.50"},
+            ]
+        }
+        for sid in _FED_FUNDS_TARGET_IDS
+    }
+
+
+@responses.activate
+def test_economy_rates_fed_funds_target_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/rates/fed-funds-target")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_rates_fed_funds_target_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("observation_start", []).append(
+            (qs.get("observation_start") or [""])[0]
+        )
+        captured.setdefault("observation_end", []).append((qs.get("observation_end") or [""])[0])
+        body = _fed_funds_target_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    fixed_today = date(2026, 5, 18)
+    with (
+        patch.dict(os.environ, {"FRED_API_KEY": "test_key"}),
+        patch(
+            "hypatia.services.economy.core._sector_dashboard_clock_today",
+            return_value=fixed_today,
+        ),
+    ):
+        resp = client.get("/api/economy/rates/fed-funds-target")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_FED_FUNDS_TARGET_IDS)
+    assert captured["observation_start"] == ["2026-01-01", "2026-01-01"]
+    assert captured["observation_end"] == ["2026-05-18", "2026-05-18"]
+    assert [s["id"] for s in data["series"]] == list(_FED_FUNDS_TARGET_IDS)
+    assert data["start_date"] == "2026-01-01"
+    assert data["end_date"] == "2026-05-18"
+    assert data["target_lower"] == 3.5
+    assert data["target_upper"] == 3.75
+    assert data["observation_date"] == "2026-05-01"
+    assert "as_of" in data
+
+
+@responses.activate
+def test_economy_rates_fed_funds_target_custom_range(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("observation_start", []).append(
+            (qs.get("observation_start") or [""])[0]
+        )
+        captured.setdefault("observation_end", []).append((qs.get("observation_end") or [""])[0])
+        body = _fed_funds_target_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get(
+            "/api/economy/rates/fed-funds-target"
+            "?observation_start=2026-03-01&observation_end=2026-04-30"
+        )
+    assert resp.status_code == 200
+    assert captured["observation_start"] == ["2026-03-01", "2026-03-01"]
+    assert captured["observation_end"] == ["2026-04-30", "2026-04-30"]
+    data = resp.get_json()
+    assert data["target_lower"] == 3.75
+    assert data["target_upper"] == 4.0
+    assert data["observation_date"] == "2026-03-01"
+
+
+@responses.activate
+def test_economy_rates_fed_funds_target_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_fed_funds_target_scenarios(), http_404_series="DFEDTARL"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/rates/fed-funds-target")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["target_lower"] is None
+    assert data["target_upper"] is None
+    assert data["observation_date"] is None
+    by_id = {s["id"]: s for s in data["series"]}
+    assert "error" in by_id["DFEDTARL"]
+    assert "error" not in by_id["DFEDTARU"]
+
+
+@responses.activate
+def test_economy_rates_fed_funds_target_all_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/rates/fed-funds-target")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
+
+
+_RATES_KEY_METRICS_IDS = ("DGS10", "MORTGAGE30US", "DGS2")
+
+
+def _rates_key_metrics_scenarios() -> dict:
+    return {
+        "DGS10": {"observations": [{"date": "2026-07-17", "value": "4.25"}]},
+        "MORTGAGE30US": {"observations": [{"date": "2026-07-10", "value": "6.81"}]},
+        "DGS2": {"observations": [{"date": "2026-07-17", "value": "4.72"}]},
+    }
+
+
+@responses.activate
+def test_economy_rates_key_metrics_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/rates/key-metrics")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_rates_key_metrics_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("sort_order", []).append((qs.get("sort_order") or [""])[0])
+        captured.setdefault("limit", []).append((qs.get("limit") or [""])[0])
+        body = _rates_key_metrics_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/rates/key-metrics")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_RATES_KEY_METRICS_IDS)
+    assert captured["sort_order"] == ["desc", "desc", "desc"]
+    assert captured["limit"] == ["1", "1", "1"]
+    assert "as_of" in data
+    assert [m["series_id"] for m in data["metrics"]] == list(_RATES_KEY_METRICS_IDS)
+    by_id = {m["series_id"]: m for m in data["metrics"]}
+    assert by_id["DGS10"] == {
+        "series_id": "DGS10",
+        "label": "10Y Treasury",
+        "note": "Benchmark long rate",
+        "value": 4.25,
+        "observation_date": "2026-07-17",
+    }
+    assert by_id["MORTGAGE30US"]["value"] == 6.81
+    assert by_id["DGS2"]["value"] == 4.72
+
+
+@responses.activate
+def test_economy_rates_key_metrics_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_rates_key_metrics_scenarios(), http_404_series="DGS10"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/rates/key-metrics")
+    assert resp.status_code == 200
+    by_id = {m["series_id"]: m for m in resp.get_json()["metrics"]}
+    assert by_id["DGS10"]["value"] is None
+    assert "error" in by_id["DGS10"]
+    assert by_id["DGS2"]["value"] == 4.72
+
+
+@responses.activate
+def test_economy_rates_key_metrics_all_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/rates/key-metrics")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
+
+
 _CPI_COMPONENTS_IDS = (
     "CPIAUCSL",
     "CUSR0000SAH1",
