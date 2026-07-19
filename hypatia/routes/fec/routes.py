@@ -8,10 +8,10 @@ import time
 import requests
 from flask import jsonify, request
 
-from hypatia.http import missing_env_key_response, truthy_query_flag
-from hypatia.logging_config import log_upstream
+from hypatia.utils.http import missing_env_key_response, truthy_query_flag
+from hypatia.utils.logging_config import log_upstream
 from hypatia.routes.fec import bp
-from hypatia.settings import Config
+from hypatia.utils.settings import Config
 
 
 @bp.get("/api/fec/v1/names/candidates")

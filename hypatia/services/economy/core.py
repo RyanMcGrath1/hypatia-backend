@@ -12,7 +12,7 @@ from typing import Any
 
 import requests
 
-from hypatia.logging_config import log_upstream
+from hypatia.utils.logging_config import log_upstream
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ FED_FUNDS_TARGET_SERIES: tuple[tuple[str, str], ...] = (
 
 
 def _parse_target_value(raw: Any) -> float | None:
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
         n = float(raw)
         return n if n == n else None
     if not isinstance(raw, str):

@@ -6,10 +6,10 @@ import os
 
 from flask import jsonify, request
 
-from hypatia.http import missing_env_key_response
+from hypatia.utils.http import missing_env_key_response
 from hypatia.routes.news import bp
 from hypatia.services.news import SEARCH_PARAMS, build_top_headlines_envelope, fetch_gnews, filter_query_args
-from hypatia.settings import Config
+from hypatia.utils.settings import Config
 
 
 @bp.get("/api/news/top-headlines")

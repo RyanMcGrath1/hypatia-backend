@@ -12,11 +12,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask
 
-from hypatia.cors import init_cors
-from hypatia.error_handlers import register_error_handlers
-from hypatia.logging_config import configure_logging, register_request_logging
 from hypatia.routes import register_blueprints
-from hypatia.settings import get_config_class
+from hypatia.utils.cors import init_cors
+from hypatia.utils.error_handlers import register_error_handlers
+from hypatia.utils.logging_config import configure_logging, register_request_logging
+from hypatia.utils.settings import get_config_class
 
 # Project root (parent of the ``hypatia`` package).
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

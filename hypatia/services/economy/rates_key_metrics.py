@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-from hypatia.logging_config import log_upstream
+from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import FRED_OBSERVATIONS_URL, FRED_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ RATES_KEY_METRICS: tuple[tuple[str, str, str], ...] = (
 
 
 def _parse_level_value(raw: Any) -> float | None:
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
         n = float(raw)
         return round(n, 2) if n == n else None
     if not isinstance(raw, str):

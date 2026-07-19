@@ -13,7 +13,7 @@ from typing import Any
 import colorlog
 from flask import Flask, g, has_request_context, request
 
-from hypatia.settings import env_truthy
+from hypatia.utils.settings import env_truthy
 
 _XFF_HEADER = "X-Forwarded-For"
 

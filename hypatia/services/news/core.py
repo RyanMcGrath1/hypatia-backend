@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from hypatia.logging_config import log_upstream
+from hypatia.utils.logging_config import log_upstream
 
 GNEWS_BASE = "https://gnews.io/api/v4"
 

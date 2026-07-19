@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from flask import jsonify
 
-from hypatia.settings import truthy_from_str
+from hypatia.utils.settings import truthy_from_str
 
 
 def missing_env_key_response(env_var: str):

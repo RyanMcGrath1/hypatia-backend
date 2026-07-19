@@ -8,10 +8,10 @@ import time
 import requests
 from flask import jsonify, request
 
-from hypatia.http import missing_env_key_response
-from hypatia.logging_config import log_upstream
+from hypatia.utils.http import missing_env_key_response
+from hypatia.utils.logging_config import log_upstream
 from hypatia.routes.civic import bp
-from hypatia.settings import Config
+from hypatia.utils.settings import Config
 
 
 @bp.get("/api/civic/divisions-by-address")

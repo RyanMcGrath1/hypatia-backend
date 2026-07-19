@@ -8,7 +8,7 @@ Flask API for Hypatia (Google Civic Information proxy, FRED-backed economy dashb
 |------|------|
 | [app.py](app.py) | Dev entrypoint: `create_app()` + `python app.py` (re-exports `app` for `flask --app app`). |
 | [wsgi.py](wsgi.py) | WSGI entry: `application = create_app()` for Gunicorn (`wsgi:application` or alias `wsgi:app`). |
-| [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)), [settings](hypatia/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/cors.py), [logging](hypatia/logging_config.py), [HTTP helpers](hypatia/http.py), [JSON error handlers](hypatia/error_handlers.py). |
+| [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)). Cross-cutting helpers under [utils/](hypatia/utils/): [settings](hypatia/utils/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/utils/cors.py), [logging](hypatia/utils/logging_config.py), [HTTP helpers](hypatia/utils/http.py), [JSON error handlers](hypatia/utils/error_handlers.py). |
 | [hypatia/routes/](hypatia/routes/__init__.py) | Flask blueprints grouped like Expo `hooks/api/` (see [docs/API_STRUCTURE.md](docs/API_STRUCTURE.md)). |
 | [hypatia/services/](hypatia/services/) | Domain logic and upstream clients (FRED economy, GNews). |
 | [economy.py](economy.py), [news.py](news.py) | Re-export shims for tests/legacy imports (implementation in `hypatia/services/`). |
@@ -57,7 +57,7 @@ Copy [.env.example](.env.example) to `.env` and set `GOOGLE_CIVIC_API_KEY`, `FRE
 Optional environment variables:
 
 - `HYPATIA_ENV` or `FLASK_ENV` — `development` (default), `production`, or `testing` (pytest uses `testing` via the app factory; not usually set by hand)
-- `SECRET_KEY` — set in production for signed cookies and similar; a dev-only default is used if unset (see [hypatia/settings.py](hypatia/settings.py))
+- `SECRET_KEY` — set in production for signed cookies and similar; a dev-only default is used if unset (see [hypatia/utils/settings.py](hypatia/utils/settings.py))
 - `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)

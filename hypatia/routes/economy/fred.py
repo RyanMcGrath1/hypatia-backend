@@ -9,7 +9,7 @@ from flask import jsonify, request
 
 from hypatia.routes.economy import bp
 from hypatia.routes.economy._common import fred_api_key_or_response
-from hypatia.logging_config import log_upstream
+from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy import FRED_OBSERVATIONS_URL, FRED_REQUEST_TIMEOUT
 
 _FRED_OBSERVATIONS_FORWARD_PARAMS = frozenset(

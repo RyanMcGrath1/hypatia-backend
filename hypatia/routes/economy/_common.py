@@ -7,9 +7,9 @@ import re
 
 from flask import jsonify, request
 
-from hypatia.http import missing_env_key_response
 from hypatia.services.economy import resolve_sector_dashboard_observation_window
-from hypatia.settings import Config
+from hypatia.utils.http import missing_env_key_response
+from hypatia.utils.settings import Config
 
 _OVERVIEW_OBSERVATION_END_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
