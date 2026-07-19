@@ -1044,3 +1044,138 @@ def test_economy_inflation_pce_vs_target_all_network_failed(client):
         resp = client.get("/api/economy/inflation/pce-vs-target")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "FRED API unavailable"
+
+
+_CPI_COMPONENTS_IDS = (
+    "CPIAUCSL",
+    "CUSR0000SAH1",
+    "CPIUFDSL",
+    "CPIENGSL",
+    "CUSR0000SACL1E",
+    "CUSR0000SASLE",
+)
+
+
+def _cpi_components_scenarios() -> dict:
+    return {
+        "CPIAUCSL": {
+            "observations": [
+                {"date": "2026-06-01", "value": "3.50"},
+                {"date": "2026-05-01", "value": "3.20"},
+            ]
+        },
+        "CUSR0000SAH1": {
+            "observations": [
+                {"date": "2026-06-01", "value": "3.30"},
+                {"date": "2026-05-01", "value": "3.10"},
+            ]
+        },
+        "CPIUFDSL": {"observations": [{"date": "2026-06-01", "value": "3.00"}]},
+        "CPIENGSL": {"observations": [{"date": "2026-06-01", "value": "15.70"}]},
+        "CUSR0000SACL1E": {"observations": [{"date": "2026-06-01", "value": "0.80"}]},
+        "CUSR0000SASLE": {"observations": [{"date": "2026-06-01", "value": "3.20"}]},
+    }
+
+
+@responses.activate
+def test_economy_inflation_cpi_components_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/inflation/cpi-components")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_inflation_cpi_components_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("units", []).append((qs.get("units") or [""])[0])
+        captured.setdefault("sort_order", []).append((qs.get("sort_order") or [""])[0])
+        captured.setdefault("limit", []).append((qs.get("limit") or [""])[0])
+        body = _cpi_components_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/inflation/cpi-components")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_CPI_COMPONENTS_IDS)
+    assert captured["units"] == ["pc1"] * len(_CPI_COMPONENTS_IDS)
+    assert captured["sort_order"] == ["desc"] * len(_CPI_COMPONENTS_IDS)
+    assert captured["limit"] == ["2"] * len(_CPI_COMPONENTS_IDS)
+    assert data["observation_date"] == "2026-06-01"
+    assert data["headline"] == {
+        "series_id": "CPIAUCSL",
+        "label": "Headline CPI",
+        "value": 3.5,
+        "observation_date": "2026-06-01",
+        "previous_value": 3.2,
+        "previous_observation_date": "2026-05-01",
+        "delta": 0.3,
+    }
+    assert [c["key"] for c in data["components"]] == [
+        "shelter",
+        "food",
+        "energy",
+        "core_goods",
+        "core_services",
+    ]
+    by_key = {c["key"]: c for c in data["components"]}
+    assert by_key["shelter"]["includes_in"] == ["core_services"]
+    assert by_key["shelter"]["value"] == 3.3
+    assert by_key["shelter"]["previous_value"] == 3.1
+    assert by_key["shelter"]["delta"] == 0.2
+    assert by_key["food"]["value"] == 3.0
+    assert by_key["food"]["previous_value"] is None
+    assert by_key["food"]["delta"] is None
+    assert by_key["energy"]["value"] == 15.7
+    assert by_key["core_goods"]["value"] == 0.8
+    assert by_key["core_services"]["value"] == 3.2
+    assert "includes_in" not in by_key["food"]
+
+
+@responses.activate
+def test_economy_inflation_cpi_components_one_series_fails(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_cpi_components_scenarios(), http_404_series="CPIENGSL"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/inflation/cpi-components")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    by_key = {c["key"]: c for c in data["components"]}
+    assert by_key["energy"]["value"] is None
+    assert "error" in by_key["energy"]
+    assert data["headline"]["value"] == 3.5
+
+
+@responses.activate
+def test_economy_inflation_cpi_components_all_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/inflation/cpi-components")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"

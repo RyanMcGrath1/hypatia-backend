@@ -19,6 +19,7 @@ from hypatia.services.economy.core import (
 )
 from hypatia.services.economy.detail import build_economy_detail, resolve_economy_detail_topic
 from hypatia.services.economy.labor_age_metrics import build_labor_age_metrics
+from hypatia.services.economy.cpi_components import build_cpi_components
 from hypatia.services.economy.pce_vs_target import build_pce_vs_target
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "build_employment_sectors",
     "build_labor_earnings_inflation",
     "build_labor_age_metrics",
+    "build_cpi_components",
     "build_pce_vs_target",
     "fetch_fred_series",
     "resolve_economy_dashboard_sector",
