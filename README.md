@@ -131,6 +131,8 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/<sector>/dashboard` | One overview section (same `sections` entry shape as `GET /api/economy/dashboard`); `sector` is a section key or app alias (`consumer` → `consumer_spending`, `rates` → `interest_rates`). **Default window:** year-to-date in UTC (Jan 1 through today) when `observation_start` and `observation_end` are omitted. Optional **`observation_start`** / **`observation_end`** (`YYYY-MM-DD`) narrow the FRED observation window; invalid or inverted ranges return **400**. Response echoes **`observation_start`** and **`observation_end`**. Not the same as `GET /api/economy/labor/sector` (payroll-by-industry chart). |
 | GET | `/api/economy/labor/sector` | Employment levels across sixteen FRED payroll series; JSON has `start_date`, `end_date`, and `series` (see [Labor employment by sector](#labor-employment-by-sector-apieconomylaborsector)). **Default window:** YTD UTC, same rules as `<sector>/dashboard`. |
 | GET | `/api/economy/labor/earnings-inflation` | `CES0500000003` (average hourly earnings) and `CPIAUCSL` (CPI inflation); same JSON shape as `labor/sector` (see [Labor earnings and CPI](#labor-earnings-and-cpi-apieconomylaborearnings-inflation)) |
+| GET | `/api/economy/rates/fed-funds-target` | FOMC fed funds target range via FRED ``DFEDTARL`` and ``DFEDTARU``; JSON has `as_of`, `target_lower`, `target_upper`, `observation_date`, and `series` (see [Fed funds target range](#fed-funds-target-range-apieconomyratesfed-funds-target)) |
+| GET | `/api/economy/rates/key-metrics` | Latest ``DGS10``, ``MORTGAGE30US``, and ``DGS2`` for the rates detail KEY METRICS widget; JSON has `as_of` and `metrics` (see [Rates key metrics](#rates-key-metrics-apieconomyrateskey-metrics)) |
 | GET | `/api/economy/labor/age-metrics` | Unemployment, labor force participation, and employment-population ratio by age cohort (12 FRED `LNS*` series); see [Labor age metrics](#labor-age-metrics-apieconomylaborage-metrics) |
 | GET | `/api/economy/fred/observations?series_id=...` | Proxies [FRED `series/observations`](https://fred.stlouisfed.org/docs/api/fred/series_observations.html); `api_key` from env only; optional `observation_start`, `sort_order`, `limit` (default 60, max 10000) |
 | GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
@@ -256,6 +258,48 @@ Example:
 
 ```bash
 curl -sS "http://127.0.0.1:5001/api/economy/labor/earnings-inflation"
+```
+
+### Fed funds target range (`/api/economy/rates/fed-funds-target`)
+
+Returns the FOMC **target range** (not the effective rate) via two daily FRED series fetched in parallel:
+
+- `DFEDTARL` — Federal Funds Target Range - Lower Limit
+- `DFEDTARU` — Federal Funds Target Range - Upper Limit
+
+**Default window:** YTD UTC; optional `observation_start` / `observation_end` (`YYYY-MM-DD`).
+
+Response (HTTP 200):
+
+- `as_of` — ISO-8601 UTC timestamp when the snapshot was built
+- `start_date` / `end_date` — inclusive FRED window (echoed from query params or YTD default)
+- `target_lower` / `target_upper` — latest numeric bounds in the window (`null` when either series failed)
+- `observation_date` — date of those latest bounds
+- `series` — ordered list of `{"id", "name", "observations": [{"date", "value"}]}` (`value` is string or `null`; per-series `"error"` on partial failure)
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/rates/fed-funds-target"
+```
+
+### Rates key metrics (`/api/economy/rates/key-metrics`)
+
+Returns the latest values for three rates shown in the interest-rates detail **KEY METRICS** widget:
+
+- `DGS10` — 10Y Treasury
+- `MORTGAGE30US` — 30Y Mortgage (weekly)
+- `DGS2` — 2Y Treasury
+
+Response (HTTP 200):
+
+- `as_of` — ISO-8601 UTC timestamp when the snapshot was built
+- `metrics` — ordered list of `{"series_id", "label", "note", "value", "observation_date"}`. Per-metric `"error"` when that FRED fetch fails; `value` and `observation_date` are then `null`.
+
+Example:
+
+```bash
+curl -sS "http://127.0.0.1:5001/api/economy/rates/key-metrics"
 ```
 
 ### Labor age metrics (`/api/economy/labor/age-metrics`)

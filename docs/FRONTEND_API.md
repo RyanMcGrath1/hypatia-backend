@@ -243,6 +243,128 @@ Same section object shape as `/api/economy/dashboard`, wrapped with window metad
 GET /api/economy/labor/dashboard
 GET /api/economy/gdp/dashboard?observation_start=2025-01-01&observation_end=2025-06-30
 GET /api/economy/rates/dashboard
+GET /api/economy/rates/fed-funds-target
+```
+
+---
+
+## `GET /api/economy/rates/fed-funds-target`
+
+**Purpose:** FOMC fed funds **target range** widget on the rates page (not the effective `FEDFUNDS` rate).
+
+Fetches FRED `DFEDTARL` (lower bound) and `DFEDTARU` (upper bound) via `series/observations`. Both series are daily and step on FOMC decision days.
+
+### Query
+
+Same window rules as `{sector}/dashboard` (default **YTD UTC**).
+
+| Parameter | Required | Format |
+|-----------|----------|--------|
+| `observation_start` | No | `YYYY-MM-DD` |
+| `observation_end` | No | `YYYY-MM-DD` |
+
+### Response `200`
+
+```json
+{
+  "as_of": "2026-05-18T17:30:00+00:00",
+  "start_date": "2026-01-01",
+  "end_date": "2026-05-18",
+  "target_lower": 3.5,
+  "target_upper": 3.75,
+  "observation_date": "2026-05-01",
+  "series": [
+    {
+      "id": "DFEDTARL",
+      "name": "Federal Funds Target Range - Lower Limit",
+      "observations": [
+        { "date": "2026-05-01", "value": "3.50" }
+      ]
+    },
+    {
+      "id": "DFEDTARU",
+      "name": "Federal Funds Target Range - Upper Limit",
+      "observations": [
+        { "date": "2026-05-01", "value": "3.75" }
+      ]
+    }
+  ]
+}
+```
+
+**Headline:** use `target_lower`, `target_upper`, and `observation_date` (e.g. display `3.50%–3.75%`).
+
+**Chart:** use `series` (same envelope as `labor/sector`). Values are strings when present; `null` when FRED reported missing (`"."`).
+
+Per-series `"error"` is included when that FRED fetch fails; headline fields are then `null`.
+
+### Errors
+
+| Status | `error` |
+|--------|---------|
+| 400 | invalid / inverted dates (message in `error`, hint in `hint`) |
+| 503 | `Missing FRED_API_KEY` |
+| 503 | `FRED API unavailable` (both series failed at network layer) |
+
+### Example
+
+```http
+GET /api/economy/rates/fed-funds-target
+GET /api/economy/rates/fed-funds-target?observation_start=2024-01-01&observation_end=2026-05-18
+```
+
+---
+
+## `GET /api/economy/rates/key-metrics`
+
+**Purpose:** KEY METRICS widget on the rates detail page — latest treasury yields and mortgage rate.
+
+Fetches FRED `DGS10`, `MORTGAGE30US`, and `DGS2` via `series/observations` (`sort_order=desc`, `limit=1`).
+
+### Response `200`
+
+```json
+{
+  "as_of": "2026-05-18T17:30:00+00:00",
+  "metrics": [
+    {
+      "series_id": "DGS10",
+      "label": "10Y Treasury",
+      "note": "Benchmark long rate",
+      "value": 4.25,
+      "observation_date": "2026-07-17"
+    },
+    {
+      "series_id": "MORTGAGE30US",
+      "label": "30Y Mortgage",
+      "note": "Constrained affordability",
+      "value": 6.81,
+      "observation_date": "2026-07-10"
+    },
+    {
+      "series_id": "DGS2",
+      "label": "2Y Treasury",
+      "note": "Policy-sensitive yield",
+      "value": 4.72,
+      "observation_date": "2026-07-17"
+    }
+  ]
+}
+```
+
+Per-metric `"error"` is included when that FRED fetch fails; `value` and `observation_date` are then `null`.
+
+### Errors
+
+| Status | `error` |
+|--------|---------|
+| 503 | `Missing FRED_API_KEY` |
+| 503 | `FRED API unavailable` (all series failed at network layer) |
+
+### Example
+
+```http
+GET /api/economy/rates/key-metrics
 ```
 
 ---
@@ -662,6 +784,8 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | GET | `/api/economy/labor/sector` |
 | GET | `/api/economy/labor/age-metrics` |
 | GET | `/api/economy/labor/earnings-inflation` |
+| GET | `/api/economy/rates/fed-funds-target` |
+| GET | `/api/economy/rates/key-metrics` |
 | GET | `/api/economy/inflation/pce-vs-target` |
 | GET | `/api/economy/inflation/cpi-components` |
 | GET | `/api/economy/fred/observations` |
