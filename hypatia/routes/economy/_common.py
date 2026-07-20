@@ -11,7 +11,8 @@ from hypatia.services.economy import resolve_sector_dashboard_observation_window
 from hypatia.utils.http import missing_env_key_response
 from hypatia.utils.settings import Config
 
-_OVERVIEW_OBSERVATION_END_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Matches YYYY-MM-DD only (shape check; not calendar validity).
+_YYYY_MM_DD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def fred_api_key_or_response():
@@ -25,7 +26,7 @@ def fred_api_key_or_response():
 def observation_end_from_request() -> tuple[str | None, tuple | None]:
     """Parse optional ``observation_end``; return (value, error_response) if invalid."""
     observation_end = (request.args.get("observation_end") or "").strip()
-    if observation_end and _OVERVIEW_OBSERVATION_END_RE.fullmatch(observation_end) is None:
+    if observation_end and _YYYY_MM_DD_RE.fullmatch(observation_end) is None:
         return None, (
             jsonify(
                 {
