@@ -1417,3 +1417,113 @@ def test_economy_inflation_cpi_components_all_network_failed(client):
         resp = client.get("/api/economy/inflation/cpi-components")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "FRED API unavailable"
+
+
+_GDP_GROWTH_SERIES_ID = "A191RL1Q225SBEA"
+
+
+def _gdp_growth_scenarios() -> dict:
+    return {
+        _GDP_GROWTH_SERIES_ID: _overview_obs(
+            [
+                ("2025-01-01", "-0.6"),
+                ("2025-04-01", "3.8"),
+                ("2025-07-01", "4.4"),
+                ("2025-10-01", "0.5"),
+                ("2026-01-01", "2.1"),
+            ]
+        ),
+    }
+
+
+@responses.activate
+def test_economy_gdp_growth_rate_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/gdp/growth-rate")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+@patch("hypatia.services.economy.detail._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
+def test_economy_gdp_growth_rate_success(_mock_today, client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("observation_start", []).append(
+            (qs.get("observation_start") or [""])[0]
+        )
+        captured.setdefault("observation_end", []).append((qs.get("observation_end") or [""])[0])
+        body = _gdp_growth_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/gdp/growth-rate")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert captured["series_id"] == [_GDP_GROWTH_SERIES_ID]
+    assert captured["observation_start"] == ["2023-01-01"]
+    assert captured["observation_end"] == ["2026-06-01"]
+    assert data["series_id"] == _GDP_GROWTH_SERIES_ID
+    assert data["value"] == 2.1
+    assert data["observation_date"] == "2026-01-01"
+    assert len(data["observations"]) == 5
+    assert data["observations"][0] == {"date": "2026-01-01", "value": 2.1}
+    assert data["observations"][-1] == {"date": "2025-01-01", "value": -0.6}
+
+
+@responses.activate
+@patch("hypatia.services.economy.detail._sector_dashboard_clock_today", return_value=date(2026, 6, 1))
+def test_economy_gdp_growth_rate_custom_window(_mock_today, client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_gdp_growth_scenarios()),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get(
+            "/api/economy/gdp/growth-rate?observation_start=2025-01-01&observation_end=2026-01-01"
+        )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["start_date"] == "2025-01-01"
+    assert data["end_date"] == "2026-01-01"
+    assert len(data["observations"]) == 5
+
+
+@responses.activate
+def test_economy_gdp_growth_rate_invalid_window(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get(
+            "/api/economy/gdp/growth-rate?observation_start=2026-06-01&observation_end=2025-01-01"
+        )
+    assert resp.status_code == 400
+
+
+@responses.activate
+def test_economy_gdp_growth_rate_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/growth-rate")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
