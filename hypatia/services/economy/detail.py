@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import logging
+import time
 from datetime import date, datetime, timezone
 from typing import Any
 
+import requests
+
+from hypatia.logging_config import log_upstream
 from hypatia.services.economy.core import (
+    FRED_OBSERVATIONS_URL,
+    FRED_REQUEST_TIMEOUT,
     _overview_def_for_section,
     _sector_dashboard_clock_today,
     build_economy_overview_sector,
@@ -18,6 +26,19 @@ GDP_GROWTH_LABEL = "Real GDP Growth Rate"
 GDP_GROWTH_UNIT = (
     "percent change from preceding period, seasonally adjusted annual rate"
 )
+
+GDP_TOTAL_SERIES_ID = "GDPC1"
+GDP_SECTOR_CONTRIBUTION_UNIT = "percent of real GDP"
+GDP_SECTOR_CONTRIBUTION_FETCH_LIMIT = 1
+
+# BEA real value added by industry (billions chained 2017 dollars, SAAR).
+GDP_SECTOR_CONTRIBUTION_DEFS: tuple[tuple[str, str, str], ...] = (
+    ("services", "RVASPI", "Services"),
+    ("manufacturing", "RVAMA", "Manufacturing"),
+    ("agriculture", "RVAAFH", "Agriculture"),
+)
+
+logger = logging.getLogger(__name__)
 
 _NETWORK_ERROR_PREFIXES = (
     "FRED request timed out",
@@ -203,3 +224,171 @@ def build_gdp_growth_rate(
         payload["error"] = "No usable observations in FRED response"
 
     return payload, network_failed
+
+
+def _parse_gdp_level_value(raw: Any) -> float | None:
+    if isinstance(raw, int | float) and not isinstance(raw, bool):
+        n = float(raw)
+        return n if n == n else None
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s or s == ".":
+        return None
+    try:
+        n = float(s)
+    except ValueError:
+        return None
+    return n if n == n else None
+
+
+def _fetch_fred_latest_level(api_key: str, series_id: str) -> dict[str, Any]:
+    """Latest observation for one FRED level series (``sort_order=desc``, ``limit=1``)."""
+    params: dict[str, str] = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "sort_order": "desc",
+        "limit": str(GDP_SECTOR_CONTRIBUTION_FETCH_LIMIT),
+    }
+    t0 = time.perf_counter()
+    try:
+        resp = requests.get(
+            FRED_OBSERVATIONS_URL,
+            params=params,
+            timeout=FRED_REQUEST_TIMEOUT,
+        )
+    except requests.Timeout:
+        logger.warning("FRED GDP sector request timed out series_id=%s", series_id)
+        return {"error": "FRED request timed out"}
+    except requests.RequestException as exc:
+        logger.warning(
+            "FRED GDP sector request failed series_id=%s error=%s",
+            series_id,
+            exc,
+        )
+        return {"error": f"FRED request failed: {exc!s}"}
+
+    log_upstream(
+        "hypatia.upstream",
+        service="fred",
+        endpoint="series/observations",
+        status_code=resp.status_code,
+        duration_ms=(time.perf_counter() - t0) * 1000.0,
+        response_bytes=len(resp.content),
+    )
+
+    if not resp.ok:
+        err_msg = f"FRED returned HTTP {resp.status_code}"
+        try:
+            err_body = resp.json()
+            if isinstance(err_body.get("error_message"), str):
+                err_msg = err_body["error_message"]
+        except ValueError:
+            pass
+        return {"error": err_msg}
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {"error": "Invalid JSON from FRED"}
+
+    raw_obs = payload.get("observations")
+    if not isinstance(raw_obs, list) or not raw_obs:
+        return {"error": "No observations in FRED response"}
+
+    for row in raw_obs:
+        if not isinstance(row, dict):
+            continue
+        d = str(row.get("date", "")).strip()
+        if not d:
+            continue
+        value = _parse_gdp_level_value(row.get("value"))
+        if value is None:
+            continue
+        return {"value": value, "observation_date": d}
+
+    return {"error": "No usable observations in FRED response"}
+
+
+def _gdp_sector_share_pct(sector_value: float, gdp_value: float) -> float | None:
+    if gdp_value == 0:
+        return None
+    return round(sector_value / gdp_value * 100, 1)
+
+
+def build_gdp_sector_contribution(api_key: str) -> tuple[dict[str, Any], bool]:
+    """Latest real value-added share of GDP for services, manufacturing, and agriculture.
+
+    Returns ``(payload, all_network_failed)``. Each sector's ``value`` is its share of
+    ``GDPC1`` for the latest common BEA quarter (percent, one decimal).
+    """
+    as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    fetch_targets: list[tuple[str, str]] = [("gdp", GDP_TOTAL_SERIES_ID)]
+    fetch_targets.extend((key, series_id) for key, series_id, _label in GDP_SECTOR_CONTRIBUTION_DEFS)
+
+    results: dict[str, dict[str, Any]] = {}
+    workers = max(1, len(fetch_targets))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_fetch_fred_latest_level, api_key, series_id): result_key
+            for result_key, series_id in fetch_targets
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            results[futures[fut]] = fut.result()
+
+    network_failed = 0
+    for result_key, _series_id in fetch_targets:
+        err = results[result_key].get("error")
+        if err and str(err).startswith(_NETWORK_ERROR_PREFIXES):
+            network_failed += 1
+
+    gdp_result = results["gdp"]
+    gdp_value = gdp_result.get("value")
+    gdp_date = gdp_result.get("observation_date")
+
+    sectors: list[dict[str, Any]] = []
+    observation_date: str | None = gdp_date if isinstance(gdp_date, str) else None
+
+    for key, series_id, label in GDP_SECTOR_CONTRIBUTION_DEFS:
+        fetch_result = results[key]
+        sector_value = fetch_result.get("value")
+        sector_date = fetch_result.get("observation_date")
+        entry: dict[str, Any] = {
+            "key": key,
+            "series_id": series_id,
+            "label": label,
+            "value": None,
+            "observation_date": sector_date if isinstance(sector_date, str) else None,
+        }
+
+        err = fetch_result.get("error")
+        gdp_err = gdp_result.get("error")
+        if err:
+            entry["error"] = err
+        elif gdp_err:
+            entry["error"] = gdp_err
+        elif isinstance(sector_value, (int, float)) and isinstance(gdp_value, (int, float)):
+            share = _gdp_sector_share_pct(float(sector_value), float(gdp_value))
+            if share is None:
+                entry["error"] = "Unable to compute sector share of GDP"
+            else:
+                entry["value"] = share
+                if isinstance(sector_date, str):
+                    observation_date = sector_date
+        else:
+            entry["error"] = "No usable observations in FRED response"
+
+        sectors.append(entry)
+
+    payload: dict[str, Any] = {
+        "as_of": as_of,
+        "unit": GDP_SECTOR_CONTRIBUTION_UNIT,
+        "gdp_series_id": GDP_TOTAL_SERIES_ID,
+        "observation_date": observation_date,
+        "sectors": sectors,
+    }
+    if gdp_err := gdp_result.get("error"):
+        payload["error"] = gdp_err
+
+    return payload, network_failed == len(fetch_targets)

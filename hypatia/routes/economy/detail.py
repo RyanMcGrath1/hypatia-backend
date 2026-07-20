@@ -9,6 +9,7 @@ from hypatia.routes.economy._common import fred_api_key_or_response, observation
 from hypatia.services.economy import build_economy_detail, resolve_economy_detail_topic
 from hypatia.services.economy.detail import (
     build_gdp_growth_rate,
+    build_gdp_sector_contribution,
     resolve_gdp_growth_observation_window,
 )
 
@@ -79,5 +80,18 @@ def economy_gdp_growth_rate():
         observation_end=obs_end,
     )
     if network_failed:
+        return jsonify({"error": "FRED API unavailable"}), 503
+    return jsonify(payload), 200
+
+
+@bp.get("/api/economy/gdp/sector-contribution")
+def economy_gdp_sector_contribution():
+    """Real value-added share of GDP by industry for the GDP detail sector widget."""
+    api_key, err = fred_api_key_or_response()
+    if err:
+        return err
+
+    payload, all_network_failed = build_gdp_sector_contribution(api_key)
+    if all_network_failed:
         return jsonify({"error": "FRED API unavailable"}), 503
     return jsonify(payload), 200

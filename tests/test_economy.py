@@ -1527,3 +1527,96 @@ def test_economy_gdp_growth_rate_network_failed(client):
         resp = client.get("/api/economy/gdp/growth-rate")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "FRED API unavailable"
+
+
+_GDP_SECTOR_SERIES = ("GDPC1", "RVASPI", "RVAMA", "RVAAFH")
+
+
+def _gdp_sector_contribution_scenarios() -> dict:
+    return {
+        "GDPC1": _overview_obs([("2026-01-01", "25000.0")]),
+        "RVASPI": _overview_obs([("2026-01-01", "17000.0")]),
+        "RVAMA": _overview_obs([("2026-01-01", "4500.0")]),
+        "RVAAFH": _overview_obs([("2026-01-01", "2500.0")]),
+    }
+
+
+@responses.activate
+def test_economy_gdp_sector_contribution_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/gdp/sector-contribution")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_gdp_sector_contribution_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("sort_order", []).append((qs.get("sort_order") or [""])[0])
+        captured.setdefault("limit", []).append((qs.get("limit") or [""])[0])
+        body = _gdp_sector_contribution_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/gdp/sector-contribution")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_GDP_SECTOR_SERIES)
+    assert captured["sort_order"] == ["desc"] * len(_GDP_SECTOR_SERIES)
+    assert captured["limit"] == ["1"] * len(_GDP_SECTOR_SERIES)
+    assert data["gdp_series_id"] == "GDPC1"
+    assert data["observation_date"] == "2026-01-01"
+    assert data["unit"] == "percent of real GDP"
+    sectors = {row["key"]: row for row in data["sectors"]}
+    assert sectors["services"]["value"] == 68.0
+    assert sectors["manufacturing"]["value"] == 18.0
+    assert sectors["agriculture"]["value"] == 10.0
+    assert sectors["services"]["series_id"] == "RVASPI"
+    assert sectors["manufacturing"]["label"] == "Manufacturing"
+
+
+@responses.activate
+def test_economy_gdp_sector_contribution_one_series_failed(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_gdp_sector_contribution_scenarios(), http_404_series="RVAMA"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/sector-contribution")
+    assert resp.status_code == 200
+    sectors = {row["key"]: row for row in resp.get_json()["sectors"]}
+    assert sectors["manufacturing"]["value"] is None
+    assert "error" in sectors["manufacturing"]
+    assert sectors["services"]["value"] == 68.0
+
+
+@responses.activate
+def test_economy_gdp_sector_contribution_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/sector-contribution")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"
