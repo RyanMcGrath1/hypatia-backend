@@ -67,7 +67,7 @@ def resolve_gdp_growth_observation_window(
 ) -> tuple[str, str]:
     """Inclusive FRED window for ``GET /api/economy/gdp/growth-rate``.
 
-    Defaults to roughly the last three calendar years (~12 quarterly points) when both
+    Defaults to roughly the last five calendar years (~20 quarterly points) when both
     bounds are omitted; otherwise uses the same rules as sector dashboards.
     """
     day = today if today is not None else _sector_dashboard_clock_today()
@@ -80,7 +80,7 @@ def resolve_gdp_growth_observation_window(
 
     s0, e0 = norm(q_start), norm(q_end)
     if s0 is None and e0 is None:
-        start = date(day.year - 3, 1, 1)
+        start = date(day.year - 5, 1, 1)
         return start.isoformat(), day.isoformat()
     return resolve_sector_dashboard_observation_window(q_start, q_end, today=day)
 

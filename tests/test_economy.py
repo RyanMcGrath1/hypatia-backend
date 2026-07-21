@@ -1473,7 +1473,7 @@ def test_economy_gdp_growth_rate_success(_mock_today, client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert captured["series_id"] == [_GDP_GROWTH_SERIES_ID]
-    assert captured["observation_start"] == ["2023-01-01"]
+    assert captured["observation_start"] == ["2021-01-01"]
     assert captured["observation_end"] == ["2026-06-01"]
     assert data["series_id"] == _GDP_GROWTH_SERIES_ID
     assert data["value"] == 2.1

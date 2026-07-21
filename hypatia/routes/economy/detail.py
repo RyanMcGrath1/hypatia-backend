@@ -68,7 +68,7 @@ def economy_gdp_growth_rate():
                     "error": str(exc),
                     "hint": (
                         "Use observation_start / observation_end as YYYY-MM-DD "
-                        "(default: last ~3 years)."
+                        "(default: last ~5 years)."
                     ),
                 }
             ),
