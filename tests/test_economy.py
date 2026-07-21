@@ -1620,3 +1620,105 @@ def test_economy_gdp_sector_contribution_network_failed(client):
         resp = client.get("/api/economy/gdp/sector-contribution")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "FRED API unavailable"
+
+
+_GDP_HEADWIND_SERIES = ("FRGSHPUSM649NCIS", "DFEDTARL", "DFEDTARU", "T10Y2Y", "PCEPILFE")
+
+
+def _gdp_headwinds_scenarios() -> dict:
+    return {
+        "FRGSHPUSM649NCIS": _overview_obs([("2026-06-01", "-3.07"), ("2026-05-01", "2.97")]),
+        "DFEDTARL": _overview_obs([("2026-07-17", "5.25")]),
+        "DFEDTARU": _overview_obs([("2026-07-17", "5.50")]),
+        "T10Y2Y": _overview_obs([("2026-07-17", "0.39"), ("2026-07-16", "0.41")]),
+        "PCEPILFE": _overview_obs([("2026-05-01", "2.8"), ("2026-04-01", "2.9")]),
+    }
+
+
+@responses.activate
+def test_economy_gdp_growth_headwinds_missing_fred_key(client):
+    with patch.dict(os.environ, {"FRED_API_KEY": ""}):
+        resp = client.get("/api/economy/gdp/growth-headwinds")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "Missing FRED_API_KEY"
+
+
+@responses.activate
+def test_economy_gdp_growth_headwinds_success(client):
+    captured: dict[str, list[str]] = {}
+
+    def callback(request):
+        qs = parse_qs(urlparse(request.url).query)
+        sid = (qs.get("series_id") or [""])[0]
+        captured.setdefault("series_id", []).append(sid)
+        captured.setdefault("units", []).append((qs.get("units") or [""])[0])
+        captured.setdefault("limit", []).append((qs.get("limit") or [""])[0])
+        body = _gdp_headwinds_scenarios().get(sid)
+        if body is None:
+            return (404, {}, "")
+        return (200, {}, json.dumps(body))
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
+        resp = client.get("/api/economy/gdp/growth-headwinds")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(captured["series_id"]) == set(_GDP_HEADWIND_SERIES)
+    assert captured["limit"] == ["2"] * len(_GDP_HEADWIND_SERIES)
+    assert captured["units"].count("pch") == 1
+    assert captured["units"].count("pc1") == 1
+
+    risks = {row["key"]: row for row in data["risks"]}
+    assert len(risks) == 4
+    assert risks["supply_chain"]["value"] == -3.1
+    assert risks["supply_chain"]["previous_value"] == 3.0
+    assert risks["supply_chain"]["risk"] == "high"
+    assert "declined 3.1%" in risks["supply_chain"]["body"]
+    assert risks["interest_rates"]["target_lower"] == 5.25
+    assert risks["interest_rates"]["target_upper"] == 5.5
+    assert risks["interest_rates"]["risk"] == "high"
+    assert risks["yield_curve"]["value"] == 0.39
+    assert risks["yield_curve"]["risk"] == "medium"
+    assert "Flat yield curve" in risks["yield_curve"]["body"]
+    assert risks["inflation"]["value"] == 2.8
+    assert risks["inflation"]["risk"] == "medium"
+    assert "Fed's 2% target" in risks["inflation"]["body"]
+
+
+@responses.activate
+def test_economy_gdp_growth_headwinds_one_series_failed(client):
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=_fred_callback(_gdp_headwinds_scenarios(), http_404_series="T10Y2Y"),
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/growth-headwinds")
+    assert resp.status_code == 200
+    risks = {row["key"]: row for row in resp.get_json()["risks"]}
+    assert risks["yield_curve"]["value"] is None
+    assert "error" in risks["yield_curve"]
+    assert risks["supply_chain"]["value"] == -3.1
+
+
+@responses.activate
+def test_economy_gdp_growth_headwinds_network_failed(client):
+    def callback(_request):
+        raise requests.exceptions.ConnectionError("network down")
+
+    responses.add_callback(
+        responses.GET,
+        re.compile(r"https://api\.stlouisfed\.org/fred/series/observations"),
+        callback=callback,
+        content_type="application/json",
+    )
+    with patch.dict(os.environ, {"FRED_API_KEY": "k"}):
+        resp = client.get("/api/economy/gdp/growth-headwinds")
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "FRED API unavailable"

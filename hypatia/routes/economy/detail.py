@@ -8,6 +8,7 @@ from hypatia.routes.economy import bp
 from hypatia.routes.economy._common import fred_api_key_or_response, observation_end_from_request
 from hypatia.services.economy import build_economy_detail, resolve_economy_detail_topic
 from hypatia.services.economy.detail import (
+    build_gdp_growth_headwinds,
     build_gdp_growth_rate,
     build_gdp_sector_contribution,
     resolve_gdp_growth_observation_window,
@@ -92,6 +93,19 @@ def economy_gdp_sector_contribution():
         return err
 
     payload, all_network_failed = build_gdp_sector_contribution(api_key)
+    if all_network_failed:
+        return jsonify({"error": "FRED API unavailable"}), 503
+    return jsonify(payload), 200
+
+
+@bp.get("/api/economy/gdp/growth-headwinds")
+def economy_gdp_growth_headwinds():
+    """Macro headwinds for the GDP detail risks panel (freight shipments, fed funds, yield curve, core PCE)."""
+    api_key, err = fred_api_key_or_response()
+    if err:
+        return err
+
+    payload, all_network_failed = build_gdp_growth_headwinds(api_key)
     if all_network_failed:
         return jsonify({"error": "FRED API unavailable"}), 503
     return jsonify(payload), 200
