@@ -36,73 +36,35 @@ Update these calls in the mobile app:
 
 ---
 
-## `GET /api/economy/detail`
+## Shared observation window (YTD UTC)
 
-**Purpose:** Premium economy section screens (GDP, labor, inflation, markets) — one topic per request.
+Several labor and rates endpoints accept optional `observation_start` / `observation_end` (`YYYY-MM-DD`, inclusive).
 
-### Query
+**Default when both omitted:** year-to-date UTC — `Jan 1` of the current UTC year through today.
 
-| Parameter | Required | Notes |
-|-----------|----------|-------|
-| `topic` | **Yes** | `gdp`, `labor`, `inflation`, or `markets` (`markets` → Fed funds / `interest_rates` section) |
-| `observation_end` | No | `YYYY-MM-DD` — same vintage rules as dashboard routes |
+| You send | Window |
+|----------|--------|
+| (nothing) | YTD UTC |
+| `observation_start` only | `observation_start` → today (UTC) |
+| `observation_end` only | Jan 1 of that year → `observation_end` |
+| both | exact inclusive range (`start` must be ≤ `end`) |
 
-### Response `200`
-
-```json
-{
-  "as_of": "2026-05-18T17:30:00+00:00",
-  "topic": "labor",
-  "charts": [
-    {
-      "key": "labor",
-      "series_id": "UNRATE",
-      "label": "Unemployment Rate",
-      "unit": "percent",
-      "observations": [{ "date": "2026-03-01", "value": 4.0 }]
-    }
-  ],
-  "headline": {
-    "chart_key": "labor",
-    "series_id": "UNRATE",
-    "label": "Unemployment Rate",
-    "unit": "percent",
-    "value": 4.0,
-    "observation_date": "2026-03-01"
-  },
-  "observation_end": "2026-06-01"
-}
-```
-
-Default FRED window when dates are omitted: **YTD UTC** (same as `{sector}/dashboard`).
-
-### Errors
-
-| Status | `error` |
-|--------|---------|
-| 400 | missing/invalid `topic` or `observation_end` |
-| 404 | `Unknown economy detail topic` |
-| 503 | `Missing FRED_API_KEY` |
+Invalid or inverted ranges return **400**.
 
 ---
 
 ## Economy routes — do not mix these up
 
-Three different economy resources. The path names are similar; the data is not.
-
 | Path | What it is | FRED data |
 |------|------------|-----------|
 | `GET /api/economy/dashboard` | **Whole Economy tab** — all macro sections | GDPC1, PCE, UNRATE, FEDFUNDS, CPIAUCSL, CSUSHPISA |
-| `GET /api/economy/{sector}/dashboard` | **One section** drill-down | Same series as that section (e.g. `labor` → **UNRATE**) |
-| `GET /api/economy/labor/sector` | **Payroll-by-industry chart** (9 lines) | PAYEMS, USPBS, USEHS, … |
+| `GET /api/economy/labor/sector` | **Payroll-by-industry chart** | PAYEMS, USPBS, USEHS, … |
 
-**Common mistake:** `labor/dashboard` is the **unemployment rate** screen. `labor/sector` is the **employment levels by industry** chart. They are not interchangeable.
+**Common mistake:** the Economy tab’s `labor` section is the **unemployment rate** (`UNRATE` inside `/api/economy/dashboard`). `labor/sector` is the **employment levels by industry** chart. They are not interchangeable.
 
 ```
-/api/economy/dashboard              →  all sections (Economy tab)
-/api/economy/labor/dashboard        →  unemployment rate only (UNRATE)
-/api/economy/labor/sector           →  payroll chart (9 series)
-/api/economy/gdp/dashboard          →  GDP section only
+/api/economy/dashboard              →  all sections (Economy tab), including UNRATE
+/api/economy/labor/sector           →  payroll chart (sixteen series)
 ```
 
 ---
@@ -174,80 +136,6 @@ GET /api/economy/dashboard?observation_end=2025-11-01
 
 ---
 
-## `GET /api/economy/{sector}/dashboard`
-
-**Purpose:** Single Economy section with a configurable date window.
-
-### Path `{sector}`
-
-| URL segment | Resolves to |
-|-------------|-------------|
-| `gdp` | `gdp` |
-| `consumer_spending` | `consumer_spending` |
-| `consumer` | `consumer_spending` (alias) |
-| `labor` | `labor` |
-| `inflation` | `inflation` |
-| `housing` | `housing` |
-| `interest_rates` | `interest_rates` |
-| `rates` | `interest_rates` (alias) |
-
-### Query
-
-| Parameter | Required | Format | Notes |
-|-----------|----------|--------|-------|
-| `observation_start` | No | `YYYY-MM-DD` | Inclusive start |
-| `observation_end` | No | `YYYY-MM-DD` | Inclusive end |
-
-**Default when both omitted:** year-to-date UTC — `Jan 1` of the current UTC year through today.
-
-| You send | Window |
-|----------|--------|
-| (nothing) | YTD UTC |
-| `observation_start` only | `observation_start` → today (UTC) |
-| `observation_end` only | Jan 1 of that year → `observation_end` |
-| both | exact inclusive range (`start` must be ≤ `end`) |
-
-### Response `200`
-
-Same section object shape as `/api/economy/dashboard`, wrapped with window metadata:
-
-```json
-{
-  "as_of": "2026-05-18T17:30:00+00:00",
-  "observation_start": "2026-01-01",
-  "observation_end": "2026-05-18",
-  "sections": {
-    "labor": {
-      "label": "Unemployment Rate",
-      "series_id": "UNRATE",
-      "unit": "percent",
-      "observations": [
-        { "date": "2026-03-01", "value": 4.0 }
-      ]
-    }
-  }
-}
-```
-
-### Errors
-
-| Status | `error` |
-|--------|---------|
-| 404 | `Unknown economy sector` |
-| 400 | invalid / inverted dates (message in `error`, hint in `hint`) |
-| 503 | `Missing FRED_API_KEY` |
-
-### Examples
-
-```http
-GET /api/economy/labor/dashboard
-GET /api/economy/gdp/dashboard?observation_start=2025-01-01&observation_end=2025-06-30
-GET /api/economy/rates/dashboard
-GET /api/economy/rates/fed-funds-target
-```
-
----
-
 ## `GET /api/economy/rates/fed-funds-target`
 
 **Purpose:** FOMC fed funds **target range** widget on the rates page (not the effective `FEDFUNDS` rate).
@@ -256,7 +144,7 @@ Fetches FRED `DFEDTARL` (lower bound) and `DFEDTARU` (upper bound) via `series/o
 
 ### Query
 
-Same window rules as `{sector}/dashboard` (default **YTD UTC**).
+Same [shared observation window](#shared-observation-window-ytd-utc) (default **YTD UTC**).
 
 | Parameter | Required | Format |
 |-----------|----------|--------|
@@ -375,7 +263,7 @@ GET /api/economy/rates/key-metrics
 
 ### Query
 
-Same window rules as `{sector}/dashboard` (default **YTD UTC**).
+Same [shared observation window](#shared-observation-window-ytd-utc) (default **YTD UTC**).
 
 | Parameter | Required | Format |
 |-----------|----------|--------|
@@ -580,26 +468,6 @@ GET /api/economy/inflation/cpi-components
 
 ---
 
-## `GET /api/economy/fred/observations`
-
-**Purpose:** Thin FRED proxy for custom series.
-
-| Parameter | Required | Notes |
-|-----------|----------|-------|
-| `series_id` | **Yes** | |
-| `observation_start` | No | |
-| `observation_end` | No | |
-| `limit` | No | default `60`, max `10000` |
-| `sort_order` | No | e.g. `desc` for newest first |
-
-Returns **raw FRED JSON** (not the Hypatia `sections` envelope).
-
-```http
-GET /api/economy/fred/observations?series_id=PAYEMS&limit=72&sort_order=desc
-```
-
----
-
 ## `GET /api/economy/fred/series/PAYEMS/delta`
 
 **Purpose:** PAYEMS month-over-month change (`units=chg`).
@@ -612,32 +480,9 @@ GET /api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc
 
 ---
 
-## Civic
-
-### `GET /api/civic/divisions-by-address`
-
-| Parameter | Required |
-|-----------|----------|
-| `address` | **Yes** |
-
-```http
-GET /api/civic/divisions-by-address?address=1600+Pennsylvania+Ave+NW+Washington+DC
-```
-
-**503** if `Missing GOOGLE_CIVIC_API_KEY`.
-
-### `GET /api/civic/representatives`
-
-**410 Gone** — API removed by Google in 2025. Use divisions-by-address.
-
----
-
 ## FEC (candidate search)
 
-Both paths are identical:
-
-- `GET /api/fec/candidates`
-- `GET /api/fec/v1/names/candidates`
+### `GET /api/fec/candidates`
 
 | Parameter | Required | Notes |
 |-----------|----------|-------|
@@ -648,7 +493,6 @@ Both paths are identical:
 
 ```http
 GET /api/fec/candidates?q=smith
-GET /api/fec/v1/names/candidates?name=jane%20doe&typeahead=1
 ```
 
 **503** if `Missing OPENFEC_API_KEY`.
@@ -670,18 +514,6 @@ GET /api/news/top-headlines?lang=en
 GET /api/news/top-headlines?lang=en&max=10&page=2
 ```
 
-### `GET /api/news/search`
-
-| Parameter | Required |
-|-----------|----------|
-| `q` | **Yes** |
-
-Plus optional GNews params (`lang`, `max`, …).
-
-```http
-GET /api/news/search?q=climate&lang=en
-```
-
 **503** if `Missing GNEWS_API_KEY`.
 
 ---
@@ -691,7 +523,6 @@ GET /api/news/search?q=climate&lang=en
 | Path | Response |
 |------|----------|
 | `GET /health` | `200` `{"message": "hello"}` — liveness / load balancers |
-| `GET /hello` | Same response as `/health` (legacy Expo health probe) |
 
 ---
 
@@ -736,13 +567,6 @@ export type EconomyDashboardResponse = {
   sections: Record<string, EconomySection>;
 };
 
-export type SectorDashboardResponse = {
-  as_of: string;
-  observation_start: string;
-  observation_end: string;
-  sections: Record<string, EconomySection>;
-};
-
 export type EmploymentSeries = {
   id: string;
   name: string;
@@ -766,8 +590,6 @@ export type LaborSectorResponse = {
 "/api/economy/sector"       →  "/api/economy/labor/sector"
 ```
 
-Verify anything that called **`/api/economy/labor/dashboard`** still should — that path is unchanged and still means UNRATE, not the payroll chart.
-
 ---
 
 ## Full route index
@@ -775,12 +597,11 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | Method | Path |
 |--------|------|
 | GET | `/health` |
-| GET | `/hello` (alias) |
-| GET | `/api/civic/divisions-by-address` |
-| GET | `/api/civic/representatives` (410) |
-| GET | `/api/economy/detail` |
 | GET | `/api/economy/dashboard` |
-| GET | `/api/economy/{sector}/dashboard` |
+| GET | `/api/economy/cpi` |
+| GET | `/api/economy/gdp/growth-rate` |
+| GET | `/api/economy/gdp/sector-contribution` |
+| GET | `/api/economy/gdp/growth-headwinds` |
 | GET | `/api/economy/labor/sector` |
 | GET | `/api/economy/labor/age-metrics` |
 | GET | `/api/economy/labor/earnings-inflation` |
@@ -788,9 +609,6 @@ Verify anything that called **`/api/economy/labor/dashboard`** still should — 
 | GET | `/api/economy/rates/key-metrics` |
 | GET | `/api/economy/inflation/pce-vs-target` |
 | GET | `/api/economy/inflation/cpi-components` |
-| GET | `/api/economy/fred/observations` |
 | GET | `/api/economy/fred/series/PAYEMS/delta` |
 | GET | `/api/fec/candidates` |
-| GET | `/api/fec/v1/names/candidates` |
 | GET | `/api/news/top-headlines` |
-| GET | `/api/news/search` |

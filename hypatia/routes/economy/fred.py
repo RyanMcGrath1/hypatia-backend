@@ -89,15 +89,6 @@ def _fred_observations_proxy(*, series_id: str, units: str | None = None):
     return jsonify(data), resp.status_code
 
 
-@bp.get("/api/economy/fred/observations")
-def fred_series_observations():
-    """Proxy FRED ``GET /fred/series/observations``; ``api_key`` from env only."""
-    series_id = request.args.get("series_id", "").strip()
-    if not series_id:
-        return jsonify({"error": "Query parameter 'series_id' is required"}), 400
-    return _fred_observations_proxy(series_id=series_id)
-
-
 @bp.get("/api/economy/fred/series/PAYEMS/delta")
 def fred_payems_delta_series():
     """PAYEMS month-over-month deltas via FRED observations (``units=chg``)."""

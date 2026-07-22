@@ -15,9 +15,3 @@ def _health_payload():
 def health():
     """JSON liveness check for load balancers."""
     return _health_payload()
-
-
-@bp.get("/hello")
-def hello():
-    """Legacy path used by older Expo clients; same response as ``/health``."""
-    return _health_payload()

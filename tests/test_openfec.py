@@ -33,7 +33,7 @@ def test_fec_candidates_forwards_q_and_key(client):
         status=200,
     )
     with patch.dict(os.environ, {"OPENFEC_API_KEY": "secret"}):
-        r = client.get("/api/fec/v1/names/candidates?q=trump")
+        r = client.get("/api/fec/candidates?q=trump")
     assert r.status_code == 200
     body = r.get_json()
     assert body["results"] == []
@@ -41,20 +41,6 @@ def test_fec_candidates_forwards_q_and_key(client):
     assert qs["api_key"] == ["secret"]
     assert qs["q"] == ["trump"]
     assert qs["per_page"] == ["5"]
-
-
-@responses.activate
-def test_fec_legacy_candidates_path_still_works(client):
-    responses.add(
-        responses.GET,
-        re.compile(r"https://api\.open\.fec\.gov/v1/names/candidates/\?"),
-        json={"results": [{"name": "X"}], "pagination": {}},
-        status=200,
-    )
-    with patch.dict(os.environ, {"OPENFEC_API_KEY": "secret"}):
-        r = client.get("/api/fec/candidates?q=a")
-    assert r.status_code == 200
-    assert r.get_json()["results"] == [{"name": "X"}]
 
 
 @responses.activate
@@ -66,7 +52,7 @@ def test_fec_omitted_per_page_defaults_to_five(client):
         status=200,
     )
     with patch.dict(os.environ, {"OPENFEC_API_KEY": "secret"}):
-        r = client.get("/api/fec/v1/names/candidates?q=tru&typeahead=1")
+        r = client.get("/api/fec/candidates?q=tru&typeahead=1")
     assert r.status_code == 200
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["per_page"] == ["5"]
@@ -81,7 +67,7 @@ def test_fec_typeahead_respects_explicit_per_page(client):
         status=200,
     )
     with patch.dict(os.environ, {"OPENFEC_API_KEY": "secret"}):
-        r = client.get("/api/fec/v1/names/candidates?q=x&typeahead=true&per_page=25")
+        r = client.get("/api/fec/candidates?q=x&typeahead=true&per_page=25")
     assert r.status_code == 200
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["per_page"] == ["25"]

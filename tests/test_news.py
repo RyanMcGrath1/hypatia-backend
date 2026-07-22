@@ -8,22 +8,12 @@ from urllib.parse import parse_qs, urlparse
 
 import responses
 
-
 @responses.activate
 def test_news_missing_gnews_key(client):
     with patch.dict(os.environ, {"GNEWS_API_KEY": ""}):
         r = client.get("/api/news/top-headlines")
     assert r.status_code == 503
     assert r.get_json()["error"] == "Missing GNEWS_API_KEY"
-
-
-@responses.activate
-def test_news_search_missing_q(client):
-    with patch.dict(os.environ, {"GNEWS_API_KEY": "test_key"}):
-        r = client.get("/api/news/search")
-    assert r.status_code == 400
-    assert r.get_json()["error"] == "Query parameter 'q' is required"
-
 
 @responses.activate
 def test_news_top_headlines_first_page_defaults(client):
@@ -51,7 +41,6 @@ def test_news_top_headlines_first_page_defaults(client):
     assert qs["page"] == ["1"]
     assert qs["max"] == ["20"]
 
-
 @responses.activate
 def test_news_top_headlines_forwards_filters_clamps_max_ignores_cache_buster(client):
     responses.add(
@@ -77,7 +66,6 @@ def test_news_top_headlines_forwards_filters_clamps_max_ignores_cache_buster(cli
     assert qs["page"] == ["1"]
     assert "_" not in qs
     assert qs["apikey"] == ["secret"]
-
 
 @responses.activate
 def test_news_top_headlines_second_page_has_more(client):
@@ -121,7 +109,6 @@ def test_news_top_headlines_second_page_has_more(client):
     assert b2["nextPage"] == 3
     assert len(b2["items"]) == 10
 
-
 @responses.activate
 def test_news_top_headlines_last_page_has_more_false(client):
     def callback(request):
@@ -148,7 +135,6 @@ def test_news_top_headlines_last_page_has_more_false(client):
     assert len(b["items"]) == 1
     assert b["total"] == 25
 
-
 @responses.activate
 def test_news_top_headlines_offset_instead_of_page(client):
     responses.add(
@@ -163,14 +149,12 @@ def test_news_top_headlines_offset_instead_of_page(client):
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["page"] == ["2"]
 
-
 @responses.activate
 def test_news_top_headlines_invalid_page(client):
     with patch.dict(os.environ, {"GNEWS_API_KEY": "secret"}):
         r = client.get("/api/news/top-headlines?page=0")
     assert r.status_code == 400
     assert "page" in r.get_json()["error"].lower()
-
 
 @responses.activate
 def test_news_top_headlines_invalid_max_not_int(client):
@@ -179,7 +163,6 @@ def test_news_top_headlines_invalid_max_not_int(client):
     assert r.status_code == 400
     assert "max" in r.get_json()["error"].lower()
 
-
 @responses.activate
 def test_news_top_headlines_offset_not_multiple_of_max(client):
     with patch.dict(os.environ, {"GNEWS_API_KEY": "secret"}):
@@ -187,31 +170,12 @@ def test_news_top_headlines_offset_not_multiple_of_max(client):
     assert r.status_code == 400
     assert "offset" in r.get_json()["error"].lower()
 
-
 @responses.activate
 def test_news_top_headlines_page_offset_mismatch(client):
     with patch.dict(os.environ, {"GNEWS_API_KEY": "secret"}):
         r = client.get("/api/news/top-headlines?max=10&page=2&offset=0")
     assert r.status_code == 400
     assert "disagree" in r.get_json()["error"].lower()
-
-
-@responses.activate
-def test_news_search_forwards_q(client):
-    responses.add(
-        responses.GET,
-        "https://gnews.io/api/v4/search",
-        json={"articles": [{"title": "x"}], "totalArticles": 1},
-        status=200,
-    )
-    with patch.dict(os.environ, {"GNEWS_API_KEY": "secret"}):
-        r = client.get("/api/news/search?q=climate&lang=en")
-    assert r.status_code == 200
-    qs = parse_qs(urlparse(responses.calls[0].request.url).query)
-    assert qs["q"] == ["climate"]
-    assert qs["lang"] == ["en"]
-    assert qs["apikey"] == ["secret"]
-
 
 @responses.activate
 def test_news_invalid_upstream_json(client):

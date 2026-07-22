@@ -30,21 +30,6 @@ TOP_HEADLINES_PAGE_SIZE_DEFAULT = 20
 TOP_HEADLINES_PAGE_SIZE_MAX = 50
 TOP_HEADLINES_PAGE_SIZE_MIN = 1
 
-SEARCH_PARAMS = frozenset(
-    {
-        "q",
-        "lang",
-        "country",
-        "max",
-        "in",
-        "nullable",
-        "from",
-        "to",
-        "sortby",
-        "page",
-    }
-)
-
 
 def filter_query_args(args, allowed: frozenset[str]) -> dict[str, str]:
     """Keep only whitelisted query keys with non-empty values."""

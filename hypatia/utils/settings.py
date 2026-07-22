@@ -29,15 +29,11 @@ class Config:
     JSON_SORT_KEYS = False
 
     # Upstream APIs (also on ``app.config`` after ``from_object``)
-    GOOGLE_CIVIC_BASE = "https://www.googleapis.com/civicinfo/v2"
-    GOOGLE_CIVIC_TIMEOUT_S = 30
-
     OPENFEC_BASE = "https://api.open.fec.gov/v1"
     OPENFEC_NAMES_PER_PAGE_DEFAULT = 5
     OPENFEC_TYPEAHEAD_TIMEOUT_S = 12
     OPENFEC_DEFAULT_TIMEOUT_S = 30
 
-    ENV_GOOGLE_CIVIC = "GOOGLE_CIVIC_API_KEY"
     ENV_FRED = "FRED_API_KEY"
     ENV_GNEWS = "GNEWS_API_KEY"
     ENV_OPENFEC = "OPENFEC_API_KEY"

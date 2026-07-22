@@ -1,4 +1,4 @@
-"""FRED-backed economy aggregation (dashboard, sector, labor, detail)."""
+"""FRED-backed economy aggregation (dashboard, labor, CPI)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-# Upstream timeout per tile (seconds); aligned with civic proxy style in app.py
+# Upstream timeout per FRED tile (seconds)
 FRED_REQUEST_TIMEOUT = 30
 
 # Overview: ten most recent FRED observations per series (quarterly vs monthly, etc.)
@@ -30,12 +30,9 @@ OVERVIEW_RECENT_OBSERVATIONS = 10
 OVERVIEW_INFLATION_SECTION_KEY = "inflation"
 OVERVIEW_INFLATION_FRED_LIMIT = OVERVIEW_RECENT_OBSERVATIONS + 12 + 26
 
-# Sector dashboard: FRED row cap when querying an explicit observation window.
-SECTOR_DASHBOARD_FRED_ROW_CAP = 2500
-
 
 def _sector_dashboard_clock_today() -> date:
-    """UTC calendar date for default sector dashboard window (tests may patch)."""
+    """UTC calendar date for the shared YTD observation window (tests may patch)."""
     return datetime.now(timezone.utc).date()
 
 
@@ -45,8 +42,9 @@ def resolve_sector_dashboard_observation_window(
     *,
     today: date | None = None,
 ) -> tuple[str, str]:
-    """Inclusive FRED window for ``GET /api/economy/<sector>/dashboard``.
+    """Shared YTD observation window helper for labor/rates endpoints.
 
+    Inclusive FRED window for endpoints that accept optional date bounds.
     Defaults to **year-to-date (UTC)**: ``{today.year}-01-01`` through ``today``.
 
     * Both omitted → YTD (UTC).
@@ -149,33 +147,6 @@ OVERVIEW_SERIES: tuple[EconomyOverviewDef, ...] = (
         unit="index",
     ),
 )
-
-# App tab uses short ids in ``GET /api/economy/{id}/dashboard``
-# (see Hypatia ``SECTOR_ID_TO_OVERVIEW_KEY``).
-_ECONOMY_DASHBOARD_SECTOR_ALIASES: dict[str, str] = {
-    "consumer": "consumer_spending",
-    "rates": "interest_rates",
-}
-
-_OVERVIEW_SECTION_KEYS: frozenset[str] = frozenset(d.section_key for d in OVERVIEW_SERIES)
-
-
-def resolve_economy_dashboard_sector(path_segment: str) -> str | None:
-    """Map URL segment (section key or app alias) to ``OVERVIEW_SERIES.section_key``."""
-    key = path_segment.strip().lower()
-    if not key:
-        return None
-    if key in _OVERVIEW_SECTION_KEYS:
-        return key
-    return _ECONOMY_DASHBOARD_SECTOR_ALIASES.get(key)
-
-
-def _overview_def_for_section(section_key: str) -> EconomyOverviewDef | None:
-    for d in OVERVIEW_SERIES:
-        if d.section_key == section_key:
-            return d
-    return None
-
 
 def _parse_observation_value(raw: str) -> int | float | str:
     """FRED uses '.' for missing; otherwise numeric strings."""
@@ -346,24 +317,15 @@ def _fetch_overview_series(
     api_key: str,
     overview: EconomyOverviewDef,
     *,
-    observation_start: str | None = None,
     observation_end: str | None = None,
-    window_mode: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Return (section_key, payload with observations or error).
 
-    Observations are the most recent releases per series (newest first).
-
-    ``window_mode`` (sector dashboards): FRED is called with ``observation_start`` and
-    ``observation_end`` and **all** points in that inclusive window are returned (capped by
-    :data:`SECTOR_DASHBOARD_FRED_ROW_CAP`). Otherwise the compact overview path returns the
-    latest :data:`OVERVIEW_RECENT_OBSERVATIONS` rows (inflation uses an extended fetch).
+    Observations are the most recent releases per series (newest first). The compact
+    overview path returns the latest :data:`OVERVIEW_RECENT_OBSERVATIONS` rows
+    (inflation uses an extended fetch).
     """
-    if window_mode:
-        if not observation_start or not observation_end:
-            raise ValueError("window_mode requires observation_start and observation_end")
-        fred_cap = SECTOR_DASHBOARD_FRED_ROW_CAP
-    elif overview.section_key == OVERVIEW_INFLATION_SECTION_KEY:
+    if overview.section_key == OVERVIEW_INFLATION_SECTION_KEY:
         fred_cap = OVERVIEW_INFLATION_FRED_LIMIT
     else:
         fred_cap = OVERVIEW_RECENT_OBSERVATIONS
@@ -375,10 +337,7 @@ def _fetch_overview_series(
         "sort_order": "desc",
         "limit": str(fred_cap),
     }
-    if window_mode:
-        params["observation_start"] = observation_start
-        params["observation_end"] = observation_end
-    elif observation_end:
+    if observation_end:
         params["observation_end"] = observation_end
 
     try:
@@ -460,18 +419,7 @@ def _fetch_overview_series(
             }
         )
 
-    if window_mode:
-        assert observation_start is not None and observation_end is not None
-        parsed_all = [
-            o
-            for o in parsed_all
-            if _observation_row_in_window(
-                str(o.get("date", "")), observation_start, observation_end
-            )
-        ]
-        out_obs = parsed_all
-    else:
-        out_obs = parsed_all[:OVERVIEW_RECENT_OBSERVATIONS]
+    out_obs = parsed_all[:OVERVIEW_RECENT_OBSERVATIONS]
 
     if not out_obs:
         return (
@@ -780,34 +728,6 @@ def build_economy_overview(
     if observation_end:
         out["observation_end"] = observation_end
     return out
-
-
-def build_economy_overview_sector(
-    api_key: str,
-    section_key: str,
-    *,
-    observation_start: str,
-    observation_end: str,
-) -> dict[str, Any]:
-    """Single-sector dashboard slice for an inclusive FRED observation window (sector routes)."""
-    overview = _overview_def_for_section(section_key)
-    if overview is None:
-        raise ValueError(f"Unknown economy overview section_key: {section_key!r}")
-
-    as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    _sk, body = _fetch_overview_series(
-        api_key,
-        overview,
-        observation_start=observation_start,
-        observation_end=observation_end,
-        window_mode=True,
-    )
-    return {
-        "as_of": as_of,
-        "sections": {section_key: body},
-        "observation_start": observation_start,
-        "observation_end": observation_end,
-    }
 
 
 # ---------------------------------------------------------------------------

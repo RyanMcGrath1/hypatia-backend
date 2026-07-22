@@ -14,7 +14,6 @@ from hypatia.routes.fec import bp
 from hypatia.utils.settings import Config
 
 
-@bp.get("/api/fec/v1/names/candidates")
 @bp.get("/api/fec/candidates")
 def fec_names_candidates():
     """Proxy for OpenFEC ``GET /v1/names/candidates/`` (key from env only)."""

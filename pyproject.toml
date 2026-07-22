@@ -1,7 +1,7 @@
 [project]
 name = "hypatia-backend"
 version = "0.0.0"
-description = "Flask API for Hypatia (civic, economy, news, and FEC proxies)"
+description = "Flask API for Hypatia (economy, news, and FEC proxies)"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]

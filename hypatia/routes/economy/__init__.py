@@ -1,4 +1,4 @@
-"""Economy API — mirrors Expo ``hooks/api/flaskMainApi``, ``economyDetailApi``, etc."""
+"""Economy API — mirrors Expo ``hooks/api/`` economy clients (dashboard, labor, rates, GDP, etc.)."""
 
 from __future__ import annotations
 

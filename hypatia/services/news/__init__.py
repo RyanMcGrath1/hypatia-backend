@@ -2,7 +2,6 @@
 
 from hypatia.services.news.core import (
     GNEWS_BASE,
-    SEARCH_PARAMS,
     TOP_HEADLINES_PAGE_SIZE_DEFAULT,
     TOP_HEADLINES_PAGE_SIZE_MAX,
     TOP_HEADLINES_PAGE_SIZE_MIN,
@@ -15,7 +14,6 @@ from hypatia.services.news.core import (
 
 __all__ = [
     "GNEWS_BASE",
-    "SEARCH_PARAMS",
     "TOP_HEADLINES_PAGE_SIZE_DEFAULT",
     "TOP_HEADLINES_PAGE_SIZE_MAX",
     "TOP_HEADLINES_PAGE_SIZE_MIN",
