@@ -210,6 +210,10 @@ def test_economy_overview_all_sections_success(client):
         "CSUSHPISA": _overview_obs(
             [("2026-03-01", "322.1"), ("2025-12-01", "320.5"), ("2025-09-01", "319.0")]
         ),
+        "VIXCLS": _overview_obs(
+            [("2026-07-21", "17.05"), ("2026-06-20", "16.65"), ("2026-05-20", "15.80")]
+        ),
+        "CFNAIMA3": _overview_obs([("2026-05-01", "0.03"), ("2026-04-01", "0.02")]),
     }
     responses.add_callback(
         responses.GET,
@@ -246,6 +250,15 @@ def test_economy_overview_all_sections_success(client):
     assert inf["observations"][0]["momInflation"] == pytest.approx(0.62)
     assert inf["observations"][0]["yoyInflation"] is None
     assert inf["observations"][0]["acceleration"] == "decelerating"
+
+    sentiment = data["sentiment"]
+    assert sentiment["is_live"] is True
+    assert sentiment["period_label"] == "MACRO INDEX"
+    assert 0 <= sentiment["score"] <= 100
+    assert sentiment["volatility_pct"] == pytest.approx(8.1, abs=0.2)
+    assert sentiment["stability"] == pytest.approx(51.05, abs=0.1)
+    assert sentiment["trend"] in {"up", "down", "flat"}
+    assert sentiment["status_label"] in {"OPTIMAL", "STEADY", "WEAK"}
 
 
 def test_economy_overview_invalid_observation_end(client):

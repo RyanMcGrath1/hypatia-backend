@@ -498,6 +498,248 @@ def _fetch_overview_series(
     return overview.section_key, body
 
 
+# ---------------------------------------------------------------------------
+# Dashboard hero sentiment (composite macro index on GET /api/economy/dashboard)
+# ---------------------------------------------------------------------------
+
+SENTIMENT_COMPOSITE_SECTION_KEYS: tuple[str, ...] = (
+    "labor",
+    "inflation",
+    "interest_rates",
+    "gdp",
+)
+_INVERSE_SENTIMENT_SECTIONS: frozenset[str] = frozenset(
+    {"labor", "inflation", "interest_rates"}
+)
+SENTIMENT_VIX_SERIES_ID = "VIXCLS"
+SENTIMENT_STABILITY_SERIES_ID = "CFNAIMA3"
+SENTIMENT_VIX_OBS_LIMIT = 22
+SENTIMENT_STABILITY_OBS_LIMIT = 2
+
+
+def _observation_numeric(value: Any) -> float | None:
+    if isinstance(value, (int, float)):  # noqa: UP038
+        n = float(value)
+        return n if math.isfinite(n) else None
+    return None
+
+
+def _observations_chronological(section: dict[str, Any]) -> list[dict[str, Any]]:
+    obs = section.get("observations")
+    if not isinstance(obs, list):
+        return []
+    rows = [o for o in obs if isinstance(o, dict) and o.get("date")]
+    return sorted(rows, key=lambda o: str(o.get("date", "")))
+
+
+def _gdp_qoq_annualized_history(chrono: list[dict[str, Any]]) -> list[float]:
+    out: list[float] = []
+    for i in range(1, len(chrono)):
+        prev = _observation_numeric(chrono[i - 1].get("value"))
+        curr = _observation_numeric(chrono[i].get("value"))
+        if prev is None or curr is None or prev <= 0:
+            continue
+        out.append((curr / prev - 1) * 400)
+    return out
+
+
+def _sentiment_history_for_section(
+    section_key: str,
+    section: dict[str, Any],
+) -> list[float]:
+    if section.get("error") or not section.get("observations"):
+        return []
+    chrono = _observations_chronological(section)
+    if section_key == "inflation":
+        return [
+            yoy
+            for o in chrono
+            if (yoy := _observation_numeric(o.get("yoyInflation"))) is not None
+        ]
+    if section_key == "gdp":
+        return _gdp_qoq_annualized_history(chrono)
+    return [
+        v
+        for o in chrono
+        if (v := _observation_numeric(o.get("value"))) is not None
+    ]
+
+
+def _metric_trend_from_history(values: list[float]) -> str:
+    if len(values) < 2:
+        return "flat"
+    first, last = values[0], values[-1]
+    if last > first:
+        return "up"
+    if last < first:
+        return "down"
+    return "flat"
+
+
+def _sentiment_trend(section_key: str, metric_trend: str) -> str:
+    if metric_trend == "flat":
+        return "flat"
+    if section_key in _INVERSE_SENTIMENT_SECTIONS:
+        return "down" if metric_trend == "up" else "up"
+    return metric_trend
+
+
+def _sentiment_trend_points(trend: str) -> int:
+    if trend == "up":
+        return 1
+    if trend == "down":
+        return -1
+    return 0
+
+
+def _composite_sentiment_score(sections: dict[str, Any]) -> tuple[float, str, int]:
+    """Return (0–100 score, net trend direction, sector count used)."""
+    points = 0
+    used = 0
+    for section_key in SENTIMENT_COMPOSITE_SECTION_KEYS:
+        section = sections.get(section_key)
+        if not isinstance(section, dict):
+            continue
+        history = _sentiment_history_for_section(section_key, section)
+        metric_trend = _metric_trend_from_history(history)
+        if len(history) < 2:
+            continue
+        points += _sentiment_trend_points(
+            _sentiment_trend(section_key, metric_trend),
+        )
+        used += 1
+    score = round(max(0.0, min(100.0, 50.0 + 12.5 * points)), 1)
+    if points > 0:
+        trend = "up"
+    elif points < 0:
+        trend = "down"
+    else:
+        trend = "flat"
+    return score, trend, used
+
+
+def _fetch_fred_compact_observations(
+    api_key: str,
+    series_id: str,
+    *,
+    limit: int,
+    observation_end: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Newest-first numeric observations for one FRED series, or ``None`` on failure."""
+    params: dict[str, str] = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "sort_order": "desc",
+        "limit": str(limit),
+    }
+    if observation_end:
+        params["observation_end"] = observation_end
+    try:
+        resp = requests.get(
+            FRED_OBSERVATIONS_URL,
+            params=params,
+            timeout=FRED_REQUEST_TIMEOUT,
+        )
+    except requests.RequestException:
+        return None
+    if not resp.ok:
+        return None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    raw_obs = payload.get("observations")
+    if not isinstance(raw_obs, list):
+        return None
+    parsed: list[dict[str, Any]] = []
+    for row in raw_obs:
+        if len(parsed) >= limit:
+            break
+        if not isinstance(row, dict):
+            continue
+        d = str(row.get("date", "")).strip()
+        if not d:
+            continue
+        val = _observation_numeric(_parse_observation_value(str(row.get("value", ""))))
+        if val is None:
+            continue
+        parsed.append({"date": d, "value": val})
+    return parsed or None
+
+
+def _vix_period_change_pct(obs_newest_first: list[dict[str, Any]]) -> float | None:
+    if len(obs_newest_first) < 2:
+        return None
+    latest = _observation_numeric(obs_newest_first[0].get("value"))
+    prior_idx = min(21, len(obs_newest_first) - 1)
+    prior = _observation_numeric(obs_newest_first[prior_idx].get("value"))
+    if latest is None or prior is None or prior == 0:
+        return None
+    return round((latest - prior) / prior * 100, 1)
+
+
+def _cfnai_stability_score(obs_newest_first: list[dict[str, Any]]) -> float | None:
+    if not obs_newest_first:
+        return None
+    latest = _observation_numeric(obs_newest_first[0].get("value"))
+    if latest is None:
+        return None
+    return round(max(0.0, min(100.0, 50.0 + latest * 35.0)), 1)
+
+
+def _sentiment_status_label(score: float) -> str:
+    if score >= 70:
+        return "OPTIMAL"
+    if score >= 45:
+        return "STEADY"
+    return "WEAK"
+
+
+def _build_economy_sentiment_block(
+    api_key: str,
+    sections: dict[str, Any],
+    *,
+    observation_end: str | None = None,
+) -> dict[str, Any]:
+    score, trend, sectors_used = _composite_sentiment_score(sections)
+
+    vix_obs = _fetch_fred_compact_observations(
+        api_key,
+        SENTIMENT_VIX_SERIES_ID,
+        limit=SENTIMENT_VIX_OBS_LIMIT,
+        observation_end=observation_end,
+    )
+    cfnai_obs = _fetch_fred_compact_observations(
+        api_key,
+        SENTIMENT_STABILITY_SERIES_ID,
+        limit=SENTIMENT_STABILITY_OBS_LIMIT,
+        observation_end=observation_end,
+    )
+
+    volatility_pct = _vix_period_change_pct(vix_obs) if vix_obs else None
+    stability = _cfnai_stability_score(cfnai_obs) if cfnai_obs else None
+
+    is_live = (
+        sectors_used >= 2
+        and volatility_pct is not None
+        and stability is not None
+    )
+
+    block: dict[str, Any] = {
+        "score": score,
+        "status_label": _sentiment_status_label(score),
+        "period_label": "MACRO INDEX",
+        "trend": trend,
+        "is_live": is_live,
+    }
+    if volatility_pct is not None:
+        block["volatility_pct"] = volatility_pct
+    if stability is not None:
+        block["stability"] = stability
+    return block
+
+
 def build_economy_overview(
     api_key: str,
     *,
@@ -526,7 +768,15 @@ def build_economy_overview(
             section_key, body = fut.result()
             sections[section_key] = body
 
-    out: dict[str, Any] = {"as_of": as_of, "sections": sections}
+    out: dict[str, Any] = {
+        "as_of": as_of,
+        "sections": sections,
+        "sentiment": _build_economy_sentiment_block(
+            api_key,
+            sections,
+            observation_end=observation_end,
+        ),
+    }
     if observation_end:
         out["observation_end"] = observation_end
     return out
