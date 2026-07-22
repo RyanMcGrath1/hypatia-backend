@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-from hypatia.logging_config import log_upstream
+from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import (
     FRED_OBSERVATIONS_URL,
     FRED_REQUEST_TIMEOUT,
@@ -227,7 +227,7 @@ def build_gdp_growth_rate(
 
 
 def _parse_gdp_level_value(raw: Any) -> float | None:
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
         n = float(raw)
         return n if n == n else None
     if not isinstance(raw, str):
