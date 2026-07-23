@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_DEV_SQLITE_URI = f"sqlite:///{(_PROJECT_ROOT / 'hypatia.db').as_posix()}"
 
 
 def truthy_from_str(raw: str | None, *, default: bool = False) -> bool:
@@ -37,12 +41,18 @@ class Config:
     ENV_FRED = "FRED_API_KEY"
     ENV_GNEWS = "GNEWS_API_KEY"
     ENV_OPENFEC = "OPENFEC_API_KEY"
+    ENV_DATABASE_URL = "DATABASE_URL"
+
+    # SQLAlchemy (Flask-SQLAlchemy reads these from ``app.config``)
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_DATABASE_URI = os.environ.get(ENV_DATABASE_URL)
 
 
 class DevelopmentConfig(Config):
     """Local development: ``DEBUG`` from env (same signal as ``app.run(debug=...)``)."""
 
     DEBUG = env_truthy("FLASK_DEBUG") or env_truthy("DEBUG")
+    SQLALCHEMY_DATABASE_URI = os.environ.get(Config.ENV_DATABASE_URL, _DEFAULT_DEV_SQLITE_URI)
 
 
 class ProductionConfig(Config):
@@ -57,6 +67,7 @@ class TestingConfig(Config):
 
     TESTING = True
     DEBUG = False
+    SQLALCHEMY_DATABASE_URI = os.environ.get(Config.ENV_DATABASE_URL, "sqlite:///:memory:")
 
 
 CONFIG_MAP: dict[str, type[Config]] = {
