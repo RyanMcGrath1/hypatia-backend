@@ -105,14 +105,23 @@ def _email_owned_by_other_user(normalized_email: str, *, exclude_user_id) -> boo
     return existing is not None
 
 
-def _delete_pending_requests_for_user(user_id) -> None:
-    pending = db.session.scalars(
-        select(EmailChangeRequest).where(
-            EmailChangeRequest.user_id == user_id,
-            EmailChangeRequest.completed_at.is_(None),
-        )
-    ).all()
-    for row in pending:
+def delete_email_change_requests_for_user(
+    user_id,
+    *,
+    pending_only: bool = False,
+) -> None:
+    """Delete email-change requests for ``user_id`` (caller commits).
+
+    When ``pending_only`` is True, only outstanding (not completed) rows are
+    removed — used when credentials change or a new request replaces a prior
+    one. Account deletion removes all rows for the user so tokens and
+    historical request rows cannot outlive the account.
+    """
+    stmt = select(EmailChangeRequest).where(EmailChangeRequest.user_id == user_id)
+    if pending_only:
+        stmt = stmt.where(EmailChangeRequest.completed_at.is_(None))
+    rows = db.session.scalars(stmt).all()
+    for row in rows:
         db.session.delete(row)
 
 
@@ -216,7 +225,7 @@ def request_email_change(
     )
 
     try:
-        _delete_pending_requests_for_user(user.id)
+        delete_email_change_requests_for_user(user.id, pending_only=True)
         db.session.add(pending)
         db.session.commit()
     except Exception:

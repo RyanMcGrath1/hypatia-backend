@@ -18,15 +18,13 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
 from hypatia.extensions import db
 from hypatia.models import (
-    EmailChangeRequest,
     Profile,
     Session,
     User,
 )
+from hypatia.services.account.email_change import delete_email_change_requests_for_user
 from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_DELETED,
@@ -72,14 +70,6 @@ def anonymized_deleted_email(user_id) -> str:
 class DeleteAccountResult:
     ok: bool
     error: str | None = None
-
-
-def _delete_email_change_requests(user_id) -> None:
-    rows = db.session.scalars(
-        select(EmailChangeRequest).where(EmailChangeRequest.user_id == user_id)
-    ).all()
-    for row in rows:
-        db.session.delete(row)
 
 
 def _send_deletion_notification(*, to_address: str) -> None:
@@ -174,7 +164,7 @@ def delete_account(
             db.session.delete(method)
 
         delete_mfa_login_challenges_for_user(user.id)
-        _delete_email_change_requests(user.id)
+        delete_email_change_requests_for_user(user.id)
         revoke_all_sessions_for_user(user)
         record_account_event(
             user,

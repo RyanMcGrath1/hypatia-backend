@@ -61,10 +61,10 @@ def change_user_password(
 
     Identity comes from ``user`` / ``current_session`` (authenticated request
     context), never from client-supplied user ids. On success: update hash,
-    set ``password_changed_at``, invalidate outstanding MFA login challenges,
-    revoke all sessions (including ``current_session``), create one
-    replacement session, and record ``PASSWORD_CHANGED`` — all in one
-    database transaction.
+    set ``password_changed_at``, invalidate outstanding MFA login challenges
+    and pending email-change requests, revoke all sessions (including
+    ``current_session``), create one replacement session, and record
+    ``PASSWORD_CHANGED`` — all in one database transaction.
     """
     if current_session.user_id != user.id:
         raise ValueError("current_session does not belong to user")
@@ -79,11 +79,18 @@ def change_user_password(
     if not password_result.ok:
         return ChangePasswordResult(ok=False, error=password_result.error)
 
+    # Local import avoids a circular dependency with email_change (which
+    # imports CURRENT_PASSWORD_INCORRECT_MESSAGE from this module).
+    from hypatia.services.account.email_change import (
+        delete_email_change_requests_for_user,
+    )
+
     now = _utcnow()
     try:
         user.password_hash = hash_password(new_password)
         user.password_changed_at = now
         delete_mfa_login_challenges_for_user(user.id)
+        delete_email_change_requests_for_user(user.id, pending_only=True)
         revoke_all_sessions_for_user(user)
         raw_token, _new_session = create_session(user)
         record_account_event(

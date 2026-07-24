@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pyotp
 from sqlalchemy import func, select
 
-from hypatia.models import AccountEvent, MfaLoginChallenge, Session, TOTPMethod, User
-from hypatia.services.account import change_user_password
+from hypatia.models import (
+    AccountEvent,
+    EmailChangeRequest,
+    MfaLoginChallenge,
+    Session,
+    TOTPMethod,
+    User,
+)
+from hypatia.services.account import (
+    INVALID_VERIFICATION_TOKEN_MESSAGE,
+    change_user_password,
+)
 from hypatia.services.auth.constants import (
     EVENT_LOGIN_SUCCESS,
     EVENT_PASSWORD_CHANGED,
@@ -32,6 +43,8 @@ from tests.auth_helpers import auth_headers, create_user_with_profile, login
 
 OLD_PASSWORD = "validpassword12"
 NEW_PASSWORD = "brandnewpassword1"
+NEW_EMAIL = "new@example.com"
+_TOKEN_RE = re.compile(r"token=([^\s&]+)")
 
 
 def _iso8601(value: datetime | None) -> str | None:
@@ -133,6 +146,56 @@ def _complete_totp(client, *, challenge_token: str, code: str):
         "/api/auth/login/totp",
         data=json.dumps({"challenge_token": challenge_token, "code": code}),
         content_type="application/json",
+    )
+
+
+def _change_email(
+    client,
+    token: str,
+    *,
+    new_email: str = NEW_EMAIL,
+    current_password: str = OLD_PASSWORD,
+):
+    return client.post(
+        "/api/account/change-email",
+        data=json.dumps(
+            {
+                "new_email": new_email,
+                "current_password": current_password,
+            }
+        ),
+        content_type="application/json",
+        headers=auth_headers(token),
+    )
+
+
+def _verify_email_change(client, raw_token: str):
+    return client.post(
+        "/api/account/change-email/verify",
+        data=json.dumps({"token": raw_token}),
+        content_type="application/json",
+    )
+
+
+def _extract_email_change_token(text: str) -> str:
+    match = _TOKEN_RE.search(text)
+    assert match is not None, f"token not found in email body: {text!r}"
+    return match.group(1)
+
+
+def _email_change_tokens_from_send_mock(mock_send) -> tuple[str, str]:
+    calls = mock_send.call_args_list
+    assert len(calls) >= 2
+    old_body = calls[0].kwargs["text_body"]
+    new_body = calls[1].kwargs["text_body"]
+    return _extract_email_change_token(old_body), _extract_email_change_token(new_body)
+
+
+def _email_change_request_count(db_session, user_id) -> int:
+    return db_session.scalar(
+        select(func.count())
+        .select_from(EmailChangeRequest)
+        .where(EmailChangeRequest.user_id == user_id)
     )
 
 
@@ -476,6 +539,11 @@ def test_failure_during_replacement_session_rolls_back(client, db_session) -> No
     db_session.commit()
     challenge_hash = hash_mfa_challenge_token(challenge_token)
 
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(client, token).status_code == 200
+        old_raw, new_raw = _email_change_tokens_from_send_mock(mock_send)
+    assert _email_change_request_count(db_session, user.id) == 1
+
     with patch(
         "hypatia.services.account.password.create_session",
         side_effect=RuntimeError("simulated failure"),
@@ -511,6 +579,16 @@ def test_failure_during_replacement_session_rolls_back(client, db_session) -> No
         )
         is not None
     )
+    # Pending email-change cleanup must also roll back.
+    assert _email_change_request_count(db_session, user.id) == 1
+    old_verify = _verify_email_change(client, old_raw)
+    assert old_verify.status_code == 200
+    assert old_verify.get_json()["email_change_complete"] is False
+    new_verify = _verify_email_change(client, new_raw)
+    assert new_verify.status_code == 200
+    assert new_verify.get_json()["email_change_complete"] is True
+    db_session.refresh(user)
+    assert user.email == NEW_EMAIL
 
 
 # --- MFA login challenge invalidation ---
@@ -709,6 +787,161 @@ def test_normal_totp_login_still_works_without_password_change(
 
     assert complete.status_code == 200
     assert validate_session(complete.get_json()["token"]).valid is True
+
+
+# --- Pending email-change invalidation ---
+
+
+def test_password_change_invalidates_unconfirmed_email_change_tokens(
+    client, db_session
+) -> None:
+    """Audit finding: outstanding email-change tokens must fail after password change."""
+    user, token = _auth_client_for(client, db_session)
+    original_email = user.email
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(client, token).status_code == 200
+        old_raw, new_raw = _email_change_tokens_from_send_mock(mock_send)
+    assert _email_change_request_count(db_session, user.id) == 1
+
+    change = _change_password(client, token)
+    assert change.status_code == 200
+    payload = change.get_json()
+    assert set(payload.keys()) == {"message", "token", "password_changed_at"}
+    assert payload["message"] == "Password changed successfully"
+    assert payload["token"]
+    assert payload["password_changed_at"]
+
+    assert _email_change_request_count(db_session, user.id) == 0
+
+    for raw in (old_raw, new_raw):
+        verify = _verify_email_change(client, raw)
+        assert verify.status_code == 400
+        assert verify.get_json() == {"error": INVALID_VERIFICATION_TOKEN_MESSAGE}
+
+    db_session.refresh(user)
+    assert user.email == original_email
+
+
+def test_password_change_invalidates_partially_confirmed_email_change(
+    client, db_session
+) -> None:
+    user, token = _auth_client_for(client, db_session)
+    original_email = user.email
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(client, token).status_code == 200
+        old_raw, new_raw = _email_change_tokens_from_send_mock(mock_send)
+
+    first = _verify_email_change(client, old_raw)
+    assert first.status_code == 200
+    assert first.get_json()["email_change_complete"] is False
+    assert _email_change_request_count(db_session, user.id) == 1
+
+    change = _change_password(client, token)
+    assert change.status_code == 200
+    assert _email_change_request_count(db_session, user.id) == 0
+
+    remaining = _verify_email_change(client, new_raw)
+    assert remaining.status_code == 400
+    assert remaining.get_json() == {"error": INVALID_VERIFICATION_TOKEN_MESSAGE}
+
+    # Previously confirmed token must also be unusable.
+    replay = _verify_email_change(client, old_raw)
+    assert replay.status_code == 400
+    assert replay.get_json() == {"error": INVALID_VERIFICATION_TOKEN_MESSAGE}
+
+    db_session.refresh(user)
+    assert user.email == original_email
+
+
+def test_password_change_does_not_invalidate_other_users_email_change(
+    client, db_session
+) -> None:
+    user_a, token_a = _auth_client_for(
+        client,
+        db_session,
+        email="usera@example.com",
+    )
+    user_b, token_b = _auth_client_for(
+        client,
+        db_session,
+        email="userb@example.com",
+    )
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(
+            client, token_a, new_email="usera-new@example.com"
+        ).status_code == 200
+        old_a, new_a = _email_change_tokens_from_send_mock(mock_send)
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(
+            client, token_b, new_email="userb-new@example.com"
+        ).status_code == 200
+        old_b, new_b = _email_change_tokens_from_send_mock(mock_send)
+
+    change = _change_password(client, token_a)
+    assert change.status_code == 200
+
+    assert _email_change_request_count(db_session, user_a.id) == 0
+    assert _email_change_request_count(db_session, user_b.id) == 1
+
+    for raw in (old_a, new_a):
+        verify = _verify_email_change(client, raw)
+        assert verify.status_code == 400
+        assert verify.get_json() == {"error": INVALID_VERIFICATION_TOKEN_MESSAGE}
+
+    first_b = _verify_email_change(client, old_b)
+    assert first_b.status_code == 200
+    assert first_b.get_json()["email_change_complete"] is False
+    second_b = _verify_email_change(client, new_b)
+    assert second_b.status_code == 200
+    assert second_b.get_json()["email_change_complete"] is True
+    db_session.refresh(user_b)
+    assert user_b.email == "userb-new@example.com"
+    db_session.refresh(user_a)
+    assert user_a.email == "usera@example.com"
+
+
+def test_new_email_change_request_works_after_password_change(client, db_session) -> None:
+    user, token = _auth_client_for(client, db_session)
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert _change_email(client, token, new_email="stale@example.com").status_code == 200
+        stale_old, stale_new = _email_change_tokens_from_send_mock(mock_send)
+
+    change = _change_password(client, token)
+    assert change.status_code == 200
+    replacement = change.get_json()["token"]
+    assert _email_change_request_count(db_session, user.id) == 0
+
+    for raw in (stale_old, stale_new):
+        verify = _verify_email_change(client, raw)
+        assert verify.status_code == 400
+        assert verify.get_json() == {"error": INVALID_VERIFICATION_TOKEN_MESSAGE}
+
+    with patch("hypatia.services.account.email_change.send_email") as mock_send:
+        assert (
+            _change_email(
+                client,
+                replacement,
+                new_email=NEW_EMAIL,
+                current_password=NEW_PASSWORD,
+            ).status_code
+            == 200
+        )
+        old_raw, new_raw = _email_change_tokens_from_send_mock(mock_send)
+
+    assert _email_change_request_count(db_session, user.id) == 1
+    first = _verify_email_change(client, old_raw)
+    assert first.status_code == 200
+    assert first.get_json()["email_change_complete"] is False
+    second = _verify_email_change(client, new_raw)
+    assert second.status_code == 200
+    assert second.get_json()["email_change_complete"] is True
+    db_session.refresh(user)
+    assert user.email == NEW_EMAIL
 
 
 # --- Profile compatibility ---
