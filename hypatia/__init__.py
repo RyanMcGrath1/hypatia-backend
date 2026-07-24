@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask
 
-from hypatia.extensions import db, migrate
+from hypatia.extensions import db, limiter, migrate
 from hypatia.routes import register_blueprints
 from hypatia.utils.cors import init_cors
 from hypatia.utils.error_handlers import register_error_handlers
@@ -45,5 +45,6 @@ def create_app(config_name: str | None = None) -> Flask:
     import hypatia.models  # noqa: F401 — register models with SQLAlchemy metadata
 
     migrate.init_app(app, db)
+    limiter.init_app(app)
     register_blueprints(app)
     return app

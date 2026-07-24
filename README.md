@@ -57,6 +57,11 @@ Optional environment variables:
 
 - `HYPATIA_ENV` or `FLASK_ENV` — `development` (default), `production`, or `testing` (pytest uses `testing` via the app factory; not usually set by hand)
 - `SECRET_KEY` — set in production for signed cookies and similar; a dev-only default is used if unset (see [hypatia/utils/settings.py](hypatia/utils/settings.py))
+- `AUTH_RATE_LIMIT_STORAGE_URI` — Flask-Limiter storage (default `memory://` for local/dev/tests). **Production multi-worker deployments should use a shared backend** (e.g. `redis://...`) so login/TOTP limits are enforced across processes. Memory storage is not sufficient for multi-instance production.
+- `AUTH_LOGIN_ACCOUNT_LIMIT` / `AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES` — password Login per-account limit (default **10** / **15** minutes; account key is an HMAC of the normalized email)
+- `AUTH_LOGIN_IP_LIMIT` / `AUTH_LOGIN_IP_WINDOW_MINUTES` — password Login per-IP limit (default **30** / **15** minutes; uses `request.remote_addr`)
+- `AUTH_TOTP_ACCOUNT_LIMIT` / `AUTH_TOTP_ACCOUNT_WINDOW_MINUTES` — TOTP completion per-account limit (default **10** / **15** minutes; keyed by resolved `user_id`)
+- `AUTH_TOTP_IP_LIMIT` / `AUTH_TOTP_IP_WINDOW_MINUTES` — TOTP completion per-IP limit (default **30** / **15** minutes)
 - `EXPO_CORS_EXTRA_ORIGINS` — comma-separated extra allowed origins (e.g. tunnel URLs like ngrok)
 - `CORS_ALLOW_ALL_ORIGINS` — set to `1`, `true`, or `yes` to allow **any** `Origin` (local debugging only; never in production)
 - `PORT` — listen port when using `python app.py` (default `5001`; macOS often reserves `5000` for AirPlay Receiver)
@@ -114,6 +119,8 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 ```
 
 (`wsgi:app` is an alias of the same object.) A minimal container build is in [Dockerfile](Dockerfile); inject API keys and `SECRET_KEY` at runtime, not into the image.
+
+With multiple Gunicorn workers, set **`AUTH_RATE_LIMIT_STORAGE_URI`** to a shared store (for example Redis). The default in-process `memory://` limiter does not share counters across workers. Client IP for auth rate limits is `request.remote_addr`; configure trusted-proxy support before relying on `X-Forwarded-For`.
 
 ## Routes
 

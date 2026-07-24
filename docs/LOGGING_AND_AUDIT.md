@@ -42,6 +42,8 @@ Soft deletion keeps the User tombstone and all `AccountEvent` rows (including `A
 
 Structured records (`event=security_event`) for security-relevant cases that cannot attach to a user row — notably `LOGIN_FAILED` for an unknown email. These use the existing Python logging stack (JSON-compatible when `LOG_FORMAT=json`). They must not invent a fake `user_id` or store the attempted email.
 
+`AUTH_RATE_LIMITED` may also be logged when password Login or TOTP completion hits a rate limit. Allowed fields: `category` (e.g. `login_account`, `login_ip`, `totp_account`, `totp_ip`), `endpoint`, `request_id`, and `ip_address` (`request.remote_addr`). Never log emails, account limiter keys, challenge tokens, passwords, or TOTP codes.
+
 ## Never log
 
 Credentials, password hashes, session tokens / token hashes, `Authorization` headers, SMTP passwords, TOTP encryption keys / secrets / codes, MFA challenge tokens/hashes, email verification or email-change tokens/URLs, or provisioning URIs. Do not serialize full ORM objects into logs.

@@ -57,6 +57,15 @@ class Config:
     ENV_TOTP_ISSUER_NAME = "TOTP_ISSUER_NAME"
     ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES = "TOTP_LOGIN_CHALLENGE_TTL_MINUTES"
     ENV_TOTP_LOGIN_MAX_ATTEMPTS = "TOTP_LOGIN_MAX_ATTEMPTS"
+    ENV_AUTH_RATE_LIMIT_STORAGE_URI = "AUTH_RATE_LIMIT_STORAGE_URI"
+    ENV_AUTH_LOGIN_ACCOUNT_LIMIT = "AUTH_LOGIN_ACCOUNT_LIMIT"
+    ENV_AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES = "AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES"
+    ENV_AUTH_LOGIN_IP_LIMIT = "AUTH_LOGIN_IP_LIMIT"
+    ENV_AUTH_LOGIN_IP_WINDOW_MINUTES = "AUTH_LOGIN_IP_WINDOW_MINUTES"
+    ENV_AUTH_TOTP_ACCOUNT_LIMIT = "AUTH_TOTP_ACCOUNT_LIMIT"
+    ENV_AUTH_TOTP_ACCOUNT_WINDOW_MINUTES = "AUTH_TOTP_ACCOUNT_WINDOW_MINUTES"
+    ENV_AUTH_TOTP_IP_LIMIT = "AUTH_TOTP_IP_LIMIT"
+    ENV_AUTH_TOTP_IP_WINDOW_MINUTES = "AUTH_TOTP_IP_WINDOW_MINUTES"
     ENV_SMTP_HOST = "SMTP_HOST"
     ENV_SMTP_PORT = "SMTP_PORT"
     ENV_SMTP_USERNAME = "SMTP_USERNAME"
@@ -78,6 +87,37 @@ class Config:
         ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES, default=5
     )
     TOTP_LOGIN_MAX_ATTEMPTS = env_int(ENV_TOTP_LOGIN_MAX_ATTEMPTS, default=5)
+
+    # Auth rate limiting (Flask-Limiter). Counts successful and failed requests
+    # that reach the decorated endpoints. Development/testing may use in-process
+    # memory storage; multi-worker/multi-instance production must set a shared
+    # backend (e.g. redis://...) via AUTH_RATE_LIMIT_STORAGE_URI.
+    # Client IP is request.remote_addr — do not trust X-Forwarded-For unless a
+    # trusted reverse-proxy (e.g. ProxyFix) is explicitly configured.
+    AUTH_LOGIN_ACCOUNT_LIMIT = env_int(ENV_AUTH_LOGIN_ACCOUNT_LIMIT, default=10)
+    AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES = env_int(
+        ENV_AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES, default=15
+    )
+    AUTH_LOGIN_IP_LIMIT = env_int(ENV_AUTH_LOGIN_IP_LIMIT, default=30)
+    AUTH_LOGIN_IP_WINDOW_MINUTES = env_int(
+        ENV_AUTH_LOGIN_IP_WINDOW_MINUTES, default=15
+    )
+    AUTH_TOTP_ACCOUNT_LIMIT = env_int(ENV_AUTH_TOTP_ACCOUNT_LIMIT, default=10)
+    AUTH_TOTP_ACCOUNT_WINDOW_MINUTES = env_int(
+        ENV_AUTH_TOTP_ACCOUNT_WINDOW_MINUTES, default=15
+    )
+    AUTH_TOTP_IP_LIMIT = env_int(ENV_AUTH_TOTP_IP_LIMIT, default=30)
+    AUTH_TOTP_IP_WINDOW_MINUTES = env_int(
+        ENV_AUTH_TOTP_IP_WINDOW_MINUTES, default=15
+    )
+    # Flask-Limiter config keys (read by limiter.init_app).
+    RATELIMIT_ENABLED = True
+    RATELIMIT_STORAGE_URI = os.environ.get(
+        ENV_AUTH_RATE_LIMIT_STORAGE_URI, "memory://"
+    )
+    # Do not emit X-RateLimit-* counter headers (avoid disclosing budgets).
+    # Retry-After on 429 is set by the error handler when available.
+    RATELIMIT_HEADERS_ENABLED = False
 
     # Outbound transactional email (SMTP). Resolved/validated at send time so
     # missing values raise EMAIL_NOT_CONFIGURED instead of attribute errors.

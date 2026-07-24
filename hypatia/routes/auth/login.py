@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 from flask import jsonify, request
+from flask_limiter.util import get_remote_address
 
-from hypatia.extensions import db
+from hypatia.extensions import db, limiter
 from hypatia.routes.auth import bp
 from hypatia.services.audit import get_audit_request_context
 from hypatia.services.auth.authentication import authenticate_user
 from hypatia.services.auth.constants import INVALID_CREDENTIALS_MESSAGE
 from hypatia.services.auth.mfa_challenge import complete_totp_login, create_mfa_login_challenge
+from hypatia.services.auth.rate_limit import (
+    log_auth_rate_limited,
+    login_account_limit_string,
+    login_account_rate_limit_key,
+    login_ip_limit_string,
+    totp_account_limit_string,
+    totp_account_rate_limit_key,
+    totp_ip_limit_string,
+)
 from hypatia.services.auth.sessions import create_session
 
 
@@ -26,7 +36,37 @@ def _json_field_errors(data: object, *fields: str) -> list[str]:
     return errors
 
 
+def _on_login_account_breach(_request_limit):
+    log_auth_rate_limited(category="login_account")
+    return None
+
+
+def _on_login_ip_breach(_request_limit):
+    log_auth_rate_limited(category="login_ip")
+    return None
+
+
+def _on_totp_account_breach(_request_limit):
+    log_auth_rate_limited(category="totp_account")
+    return None
+
+
+def _on_totp_ip_breach(_request_limit):
+    log_auth_rate_limited(category="totp_ip")
+    return None
+
+
 @bp.post("/api/auth/login")
+@limiter.limit(
+    login_ip_limit_string,
+    key_func=get_remote_address,
+    on_breach=_on_login_ip_breach,
+)
+@limiter.limit(
+    login_account_limit_string,
+    key_func=login_account_rate_limit_key,
+    on_breach=_on_login_account_breach,
+)
 def login():
     """Validate credentials; return a Session or an MFA challenge when required."""
     data = request.get_json(silent=True)
@@ -66,6 +106,16 @@ def login():
 
 
 @bp.post("/api/auth/login/totp")
+@limiter.limit(
+    totp_ip_limit_string,
+    key_func=get_remote_address,
+    on_breach=_on_totp_ip_breach,
+)
+@limiter.limit(
+    totp_account_limit_string,
+    key_func=totp_account_rate_limit_key,
+    on_breach=_on_totp_account_breach,
+)
 def login_totp():
     """Complete MFA login with a challenge token and authenticator code."""
     data = request.get_json(silent=True)

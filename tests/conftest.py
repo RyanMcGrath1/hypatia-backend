@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from hypatia import create_app
-from hypatia.extensions import db
+from hypatia.extensions import db, limiter
 
 
 @pytest.fixture
@@ -25,3 +25,13 @@ def db_session(app):
         yield db.session
         db.session.remove()
         db.drop_all()
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_rate_limiter(app):
+    """Prevent Flask-Limiter memory counters from leaking across tests."""
+    with app.app_context():
+        limiter.reset()
+    yield
+    with app.app_context():
+        limiter.reset()
