@@ -9,6 +9,7 @@ from typing import Any
 
 from hypatia.models import Profile, User
 from hypatia.services.auth.registration import MAX_NAME_LENGTH
+from hypatia.services.security.totp import user_has_totp_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,16 @@ class ProfileView:
     date_joined: str
     email: str
     password_changed_at: str | None
+    totp_enabled: bool
 
-    def as_dict(self) -> dict[str, str | None]:
+    def as_dict(self) -> dict[str, str | bool | None]:
         return {
             "first_name": self.first_name,
             "last_name": self.last_name,
             "date_joined": self.date_joined,
             "email": self.email,
             "password_changed_at": self.password_changed_at,
+            "totp_enabled": self.totp_enabled,
         }
 
 
@@ -75,6 +78,7 @@ def _build_view(user: User, profile: Profile) -> ProfileView:
         date_joined=_iso8601(user.created_at) or "",
         email=user.email,
         password_changed_at=_iso8601(user.password_changed_at),
+        totp_enabled=user_has_totp_enabled(user),
     )
 
 

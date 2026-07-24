@@ -14,8 +14,10 @@ from hypatia.extensions import db
 if TYPE_CHECKING:
     from hypatia.models.account_event import AccountEvent
     from hypatia.models.email_change_request import EmailChangeRequest
+    from hypatia.models.mfa_login_challenge import MfaLoginChallenge
     from hypatia.models.profile import Profile
     from hypatia.models.session import Session
+    from hypatia.models.totp_method import TOTPMethod
 
 
 def _utcnow() -> datetime:
@@ -65,6 +67,17 @@ class User(db.Model):
         passive_deletes=True,
     )
     email_change_requests: Mapped[list[EmailChangeRequest]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    totp_method: Mapped[TOTPMethod | None] = relationship(
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    mfa_login_challenges: Mapped[list[MfaLoginChallenge]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,

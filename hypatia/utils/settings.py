@@ -53,6 +53,10 @@ class Config:
     ENV_OPENFEC = "OPENFEC_API_KEY"
     ENV_DATABASE_URL = "DATABASE_URL"
     ENV_AUTH_SESSION_TTL_DAYS = "AUTH_SESSION_TTL_DAYS"
+    ENV_TOTP_ENCRYPTION_KEY = "TOTP_ENCRYPTION_KEY"
+    ENV_TOTP_ISSUER_NAME = "TOTP_ISSUER_NAME"
+    ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES = "TOTP_LOGIN_CHALLENGE_TTL_MINUTES"
+    ENV_TOTP_LOGIN_MAX_ATTEMPTS = "TOTP_LOGIN_MAX_ATTEMPTS"
     ENV_SMTP_HOST = "SMTP_HOST"
     ENV_SMTP_PORT = "SMTP_PORT"
     ENV_SMTP_USERNAME = "SMTP_USERNAME"
@@ -65,6 +69,15 @@ class Config:
 
     # Auth sessions (opaque Bearer tokens; TTL enforced server-side)
     AUTH_SESSION_TTL_DAYS = env_int(ENV_AUTH_SESSION_TTL_DAYS, default=30)
+
+    # TOTP MFA — Fernet key must be supplied via environment (no production default).
+    # Do not generate a new key on each startup; enrolled secrets would become undecryptable.
+    TOTP_ENCRYPTION_KEY = os.environ.get(ENV_TOTP_ENCRYPTION_KEY, "")
+    TOTP_ISSUER_NAME = os.environ.get(ENV_TOTP_ISSUER_NAME, "Hypatia")
+    TOTP_LOGIN_CHALLENGE_TTL_MINUTES = env_int(
+        ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES, default=5
+    )
+    TOTP_LOGIN_MAX_ATTEMPTS = env_int(ENV_TOTP_LOGIN_MAX_ATTEMPTS, default=5)
 
     # Outbound transactional email (SMTP). Resolved/validated at send time so
     # missing values raise EMAIL_NOT_CONFIGURED instead of attribute errors.
@@ -114,6 +127,16 @@ class TestingConfig(Config):
     TESTING = True
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = os.environ.get(Config.ENV_DATABASE_URL, "sqlite:///:memory:")
+    # Deterministic valid Fernet key (32 zero bytes, url-safe base64). Tests only.
+    TOTP_ENCRYPTION_KEY = os.environ.get(
+        Config.ENV_TOTP_ENCRYPTION_KEY,
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    )
+    TOTP_ISSUER_NAME = os.environ.get(Config.ENV_TOTP_ISSUER_NAME, "Hypatia")
+    TOTP_LOGIN_CHALLENGE_TTL_MINUTES = env_int(
+        Config.ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES, default=5
+    )
+    TOTP_LOGIN_MAX_ATTEMPTS = env_int(Config.ENV_TOTP_LOGIN_MAX_ATTEMPTS, default=5)
 
 
 CONFIG_MAP: dict[str, type[Config]] = {

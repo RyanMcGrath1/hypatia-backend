@@ -15,6 +15,7 @@ from hypatia.routes.fec import bp as fec_bp
 from hypatia.routes.health import bp as health_bp
 from hypatia.routes.news import bp as news_bp
 from hypatia.routes.profile import bp as profile_bp
+from hypatia.routes.security import bp as security_bp
 
 
 def register_blueprints(app: Flask) -> None:
@@ -23,6 +24,7 @@ def register_blueprints(app: Flask) -> None:
         auth_bp,
         profile_bp,
         account_bp,
+        security_bp,
         fec_bp,
         economy_bp,
         news_bp,

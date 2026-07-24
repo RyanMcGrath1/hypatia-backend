@@ -86,10 +86,15 @@ def test_get_profile_authenticated_returns_expected_fields(client, db_session) -
     assert payload["email"] == "user@example.com"
     assert payload["date_joined"] == _iso8601(user.created_at)
     assert payload["password_changed_at"] == _iso8601(changed_at)
+    assert payload["totp_enabled"] is False
     assert "user_id" not in payload
     assert "id" not in payload
     assert "password_hash" not in payload
     assert "password" not in payload
+    assert "secret_encrypted" not in payload
+    assert "provisioning_uri" not in payload
+    assert "manual_entry_key" not in payload
+    assert "last_used_timecode" not in payload
 
 
 def test_get_profile_password_changed_at_can_be_null(client, db_session) -> None:
@@ -390,12 +395,14 @@ def test_patch_response_matches_get_shape_with_updated_values(client, db_session
         "date_joined",
         "email",
         "password_changed_at",
+        "totp_enabled",
     }
     assert payload["first_name"] == "Matt"
     assert payload["last_name"] == "Thompson"
     assert payload["email"] == "user@example.com"
     assert payload["date_joined"] == _iso8601(user.created_at)
     assert payload["password_changed_at"] == _iso8601(user.password_changed_at)
+    assert payload["totp_enabled"] is False
     assert "user_id" not in payload
     assert "password_hash" not in payload
 
