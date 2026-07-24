@@ -60,6 +60,8 @@ class Config:
     ENV_SMTP_SECURITY = "SMTP_SECURITY"
     ENV_EMAIL_FROM_ADDRESS = "EMAIL_FROM_ADDRESS"
     ENV_EMAIL_FROM_NAME = "EMAIL_FROM_NAME"
+    ENV_EMAIL_CHANGE_TOKEN_TTL_HOURS = "EMAIL_CHANGE_TOKEN_TTL_HOURS"
+    ENV_EMAIL_CHANGE_VERIFY_URL = "EMAIL_CHANGE_VERIFY_URL"
 
     # Auth sessions (opaque Bearer tokens; TTL enforced server-side)
     AUTH_SESSION_TTL_DAYS = env_int(ENV_AUTH_SESSION_TTL_DAYS, default=30)
@@ -76,6 +78,16 @@ class Config:
     EMAIL_FROM_ADDRESS = os.environ.get(ENV_EMAIL_FROM_ADDRESS, "")
     EMAIL_FROM_NAME = os.environ.get(ENV_EMAIL_FROM_NAME, "")
     SMTP_TIMEOUT_S = 30
+
+    # Email change: dual-confirmation opaque tokens (TTL enforced server-side).
+    # EMAIL_CHANGE_VERIFY_URL is the frontend/deep-link base; the raw token is
+    # appended as ?token=... when building confirmation links (never log those URLs).
+    EMAIL_CHANGE_TOKEN_TTL_HOURS = env_int(
+        ENV_EMAIL_CHANGE_TOKEN_TTL_HOURS, default=8
+    )
+    EMAIL_CHANGE_VERIFY_URL = os.environ.get(
+        ENV_EMAIL_CHANGE_VERIFY_URL, "hypatia://verify-email-change"
+    )
 
     # SQLAlchemy (Flask-SQLAlchemy reads these from ``app.config``)
     SQLALCHEMY_TRACK_MODIFICATIONS = False

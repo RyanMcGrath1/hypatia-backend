@@ -13,6 +13,7 @@ from hypatia.extensions import db
 
 if TYPE_CHECKING:
     from hypatia.models.account_event import AccountEvent
+    from hypatia.models.email_change_request import EmailChangeRequest
     from hypatia.models.profile import Profile
     from hypatia.models.session import Session
 
@@ -59,6 +60,11 @@ class User(db.Model):
         passive_deletes=True,
     )
     sessions: Mapped[list[Session]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    email_change_requests: Mapped[list[EmailChangeRequest]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
