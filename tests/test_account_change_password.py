@@ -600,13 +600,30 @@ def test_password_change_invalidates_all_outstanding_mfa_challenges(
         client, email="user@example.com", password=OLD_PASSWORD
     )
     assert challenge_a != challenge_b
+    # Single-active challenge: a second password login replaces A with B.
     assert (
         db_session.scalar(
             select(func.count())
             .select_from(MfaLoginChallenge)
             .where(MfaLoginChallenge.user_id == user.id)
         )
-        == 2
+        == 1
+    )
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_a)
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_b)
+            )
+        )
+        is not None
     )
 
     change = _change_password(client, session_token)

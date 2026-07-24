@@ -60,7 +60,14 @@ def _max_attempts() -> int:
 
 
 def create_mfa_login_challenge(user: User) -> str:
-    """Create an MFA challenge row and return the raw token (caller commits)."""
+    """Create an MFA challenge row and return the raw token (caller commits).
+
+    Deletes any prior MFA login challenges for this user first so at most one
+    usable challenge exists. Invalidation and creation share the caller's
+    transaction — this function does not commit.
+    """
+    delete_mfa_login_challenges_for_user(user.id)
+
     now = _utcnow()
     raw_token = generate_mfa_challenge_token()
     challenge = MfaLoginChallenge(

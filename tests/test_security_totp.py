@@ -1027,3 +1027,243 @@ def test_failed_complete_mfa_session_creation_does_not_mark_success(
         )
     )
     assert challenge_row.consumed_at is None
+
+
+# --- Single active MFA login challenge ---
+
+
+def _password_login_challenge(client, *, email: str, password: str = PASSWORD) -> str:
+    response = client.post(
+        "/api/auth/login",
+        data=json.dumps({"email": email, "password": password}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload is not None
+    assert payload == {
+        "mfa_required": True,
+        "mfa_method": "totp",
+        "challenge_token": payload["challenge_token"],
+    }
+    assert "token" not in payload
+    challenge = payload["challenge_token"]
+    assert isinstance(challenge, str) and challenge
+    return challenge
+
+
+def _next_valid_totp_code(db_session, user, secret: str) -> tuple[str, float]:
+    """Return a TOTP code and mocked time that avoid last_used_timecode replay."""
+    method = db_session.get(TOTPMethod, user.id)
+    assert method is not None
+    assert method.last_used_timecode is not None
+    next_time = (method.last_used_timecode + 1) * 30 + 1
+    return pyotp.TOTP(secret).at(next_time), float(next_time)
+
+
+def _complete_totp(client, *, challenge_token: str, code: str):
+    return client.post(
+        "/api/auth/login/totp",
+        data=json.dumps({"challenge_token": challenge_token, "code": code}),
+        content_type="application/json",
+    )
+
+
+def test_second_password_login_replaces_prior_mfa_challenge(client, db_session) -> None:
+    """Only the newest MFA challenge remains usable after another password login."""
+    user, token = _auth_client(client, db_session)
+    secret, _ = _enroll_enabled(client, db_session, user, token)
+
+    challenge_a = _password_login_challenge(client, email="user@example.com")
+    challenge_b = _password_login_challenge(client, email="user@example.com")
+    assert challenge_a != challenge_b
+
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user.id)
+        )
+        == 1
+    )
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_a)
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_b)
+            )
+        )
+        is not None
+    )
+
+    sessions_before = db_session.scalar(
+        select(func.count())
+        .select_from(Session)
+        .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+    )
+
+    code, mocked_time = _next_valid_totp_code(db_session, user, secret)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        # Missing challenge fails before TOTP verification, so the timecode is unused.
+        failed = _complete_totp(client, challenge_token=challenge_a, code=code)
+        assert failed.status_code == 401
+        assert failed.get_json() == {"error": INVALID_CREDENTIALS_MESSAGE}
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(Session)
+                .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+            )
+            == sessions_before
+        )
+
+        success = _complete_totp(client, challenge_token=challenge_b, code=code)
+        assert success.status_code == 200
+        assert validate_session(success.get_json()["token"]).valid is True
+
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Session)
+            .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+        )
+        == sessions_before + 1
+    )
+
+
+def test_mfa_challenge_replacement_is_scoped_by_user(client, db_session) -> None:
+    user_a, token_a = _auth_client(client, db_session, email="usera@example.com")
+    secret_a, _ = _enroll_enabled(client, db_session, user_a, token_a)
+    user_b, token_b = _auth_client(client, db_session, email="userb@example.com")
+    secret_b, _ = _enroll_enabled(client, db_session, user_b, token_b)
+
+    challenge_a1 = _password_login_challenge(client, email="usera@example.com")
+    challenge_b1 = _password_login_challenge(client, email="userb@example.com")
+    challenge_a2 = _password_login_challenge(client, email="usera@example.com")
+
+    assert challenge_a1 != challenge_a2
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user_a.id)
+        )
+        == 1
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user_b.id)
+        )
+        == 1
+    )
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_b1)
+            )
+        )
+        is not None
+    )
+
+    code_a, mocked_a = _next_valid_totp_code(db_session, user_a, secret_a)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_a,
+    ):
+        assert (
+            _complete_totp(client, challenge_token=challenge_a1, code=code_a).status_code
+            == 401
+        )
+        assert (
+            _complete_totp(client, challenge_token=challenge_a2, code=code_a).status_code
+            == 200
+        )
+
+    code_b, mocked_b = _next_valid_totp_code(db_session, user_b, secret_b)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_b,
+    ):
+        assert (
+            _complete_totp(client, challenge_token=challenge_b1, code=code_b).status_code
+            == 200
+        )
+
+
+def test_failed_password_login_does_not_invalidate_mfa_challenge(
+    client, db_session
+) -> None:
+    user, token = _auth_client(client, db_session)
+    secret, _ = _enroll_enabled(client, db_session, user, token)
+
+    challenge_a = _password_login_challenge(client, email="user@example.com")
+    challenge_hash = hash_mfa_challenge_token(challenge_a)
+
+    failed = client.post(
+        "/api/auth/login",
+        data=json.dumps({"email": "user@example.com", "password": "wrongpassword12"}),
+        content_type="application/json",
+    )
+    assert failed.status_code == 401
+    assert failed.get_json() == {"error": INVALID_CREDENTIALS_MESSAGE}
+
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(MfaLoginChallenge.token_hash == challenge_hash)
+        )
+        is not None
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user.id)
+        )
+        == 1
+    )
+
+    code, mocked_time = _next_valid_totp_code(db_session, user, secret)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        complete = _complete_totp(client, challenge_token=challenge_a, code=code)
+    assert complete.status_code == 200
+    assert validate_session(complete.get_json()["token"]).valid is True
+
+
+def test_password_only_login_creates_no_mfa_challenge_row(client, db_session) -> None:
+    create_user_with_profile(
+        db_session,
+        email="plain@example.com",
+        password=PASSWORD,
+    )
+    before = db_session.scalar(select(func.count()).select_from(MfaLoginChallenge))
+
+    response = client.post(
+        "/api/auth/login",
+        data=json.dumps({"email": "plain@example.com", "password": PASSWORD}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["message"] == "Login successful"
+    assert "token" in payload
+    assert "mfa_required" not in payload
+    assert "challenge_token" not in payload
+
+    assert (
+        db_session.scalar(select(func.count()).select_from(MfaLoginChallenge)) == before
+    )
