@@ -23,6 +23,16 @@ def env_truthy(name: str, *, default: bool = False) -> bool:
     return truthy_from_str(os.environ.get(name), default=default)
 
 
+def env_int(name: str, *, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
 class Config:
     """Default settings shared across environments (override in subclasses)."""
 
@@ -42,6 +52,10 @@ class Config:
     ENV_GNEWS = "GNEWS_API_KEY"
     ENV_OPENFEC = "OPENFEC_API_KEY"
     ENV_DATABASE_URL = "DATABASE_URL"
+    ENV_AUTH_SESSION_TTL_DAYS = "AUTH_SESSION_TTL_DAYS"
+
+    # Auth sessions (opaque Bearer tokens; TTL enforced server-side)
+    AUTH_SESSION_TTL_DAYS = env_int(ENV_AUTH_SESSION_TTL_DAYS, default=30)
 
     # SQLAlchemy (Flask-SQLAlchemy reads these from ``app.config``)
     SQLALCHEMY_TRACK_MODIFICATIONS = False

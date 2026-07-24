@@ -14,6 +14,7 @@ from hypatia.extensions import db
 if TYPE_CHECKING:
     from hypatia.models.account_event import AccountEvent
     from hypatia.models.profile import Profile
+    from hypatia.models.session import Session
 
 
 def _utcnow() -> datetime:
@@ -53,6 +54,11 @@ class User(db.Model):
         passive_deletes=True,
     )
     account_events: Mapped[list[AccountEvent]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    sessions: Mapped[list[Session]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
