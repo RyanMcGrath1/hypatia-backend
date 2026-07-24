@@ -14,12 +14,8 @@ from hypatia.services.auth.constants import (
     EVENT_LOGIN_FAILED,
     EVENT_LOGIN_SUCCESS,
 )
+from hypatia.services.auth.emails import normalize_email
 from hypatia.services.auth.passwords import hash_password, password_needs_rehash, verify_password
-
-
-def normalize_email_for_lookup(email: str) -> str:
-    """Normalize email for lookup (strip + casefold). Registration must use the same rule."""
-    return email.strip().casefold()
 
 
 def _utcnow() -> datetime:
@@ -33,7 +29,7 @@ class AuthenticationResult:
 
 
 def _find_user_by_email(email: str) -> User | None:
-    normalized = normalize_email_for_lookup(email)
+    normalized = normalize_email(email)
     return db.session.scalar(select(User).where(func.lower(User.email) == normalized))
 
 
@@ -59,7 +55,11 @@ def authenticate_user(
     ip_address: str | None = None,
     commit: bool = True,
 ) -> AuthenticationResult:
-    """Authenticate by email/password. Failures do not reveal whether the email exists."""
+    """Authenticate by email/password. Failures do not reveal whether the email exists.
+
+    Decision: do not gate login on ``email_verified`` until email verification exists.
+    An ``email_verified`` check may be added here when that feature is implemented.
+    """
     user = _find_user_by_email(email)
     if user is None:
         return AuthenticationResult(success=False)

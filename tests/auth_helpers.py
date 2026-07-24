@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from hypatia.models import User
+from hypatia.services.auth.emails import normalize_email
 from hypatia.services.auth.passwords import hash_password
 
 
@@ -16,7 +17,7 @@ def create_user(
     account_status: str = "active",
 ) -> User:
     user = User(
-        email=email,
+        email=normalize_email(email),
         password_hash=hash_password(password),
         account_status=account_status,
     )
