@@ -75,6 +75,20 @@ def create_mfa_login_challenge(user: User) -> str:
     return raw_token
 
 
+def delete_mfa_login_challenges_for_user(user_id) -> None:
+    """Delete all MFA login challenges for ``user_id`` (caller commits).
+
+    Used when credentials change or the account is deleted so outstanding
+    pre-authentication challenges cannot be completed afterward. Already
+    consumed or expired rows are removed harmlessly.
+    """
+    rows = db.session.scalars(
+        select(MfaLoginChallenge).where(MfaLoginChallenge.user_id == user_id)
+    ).all()
+    for row in rows:
+        db.session.delete(row)
+
+
 @dataclass(frozen=True, slots=True)
 class CompleteTotpLoginResult:
     ok: bool
@@ -170,6 +184,7 @@ __all__ = [
     "CompleteTotpLoginResult",
     "complete_totp_login",
     "create_mfa_login_challenge",
+    "delete_mfa_login_challenges_for_user",
     "generate_mfa_challenge_token",
     "hash_mfa_challenge_token",
     "user_has_totp_enabled",

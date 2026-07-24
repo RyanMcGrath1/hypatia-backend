@@ -23,7 +23,6 @@ from sqlalchemy import select
 from hypatia.extensions import db
 from hypatia.models import (
     EmailChangeRequest,
-    MfaLoginChallenge,
     Profile,
     Session,
     User,
@@ -33,6 +32,7 @@ from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_DELETED,
     EVENT_ACCOUNT_DELETED,
 )
+from hypatia.services.auth.mfa_challenge import delete_mfa_login_challenges_for_user
 from hypatia.services.auth.passwords import hash_password, verify_password
 from hypatia.services.auth.sessions import revoke_all_sessions_for_user
 from hypatia.services.email import EmailDeliveryError, EmailNotConfiguredError, send_email
@@ -77,14 +77,6 @@ class DeleteAccountResult:
 def _delete_email_change_requests(user_id) -> None:
     rows = db.session.scalars(
         select(EmailChangeRequest).where(EmailChangeRequest.user_id == user_id)
-    ).all()
-    for row in rows:
-        db.session.delete(row)
-
-
-def _delete_mfa_login_challenges(user_id) -> None:
-    rows = db.session.scalars(
-        select(MfaLoginChallenge).where(MfaLoginChallenge.user_id == user_id)
     ).all()
     for row in rows:
         db.session.delete(row)
@@ -181,7 +173,7 @@ def delete_account(
         if method is not None:
             db.session.delete(method)
 
-        _delete_mfa_login_challenges(user.id)
+        delete_mfa_login_challenges_for_user(user.id)
         _delete_email_change_requests(user.id)
         revoke_all_sessions_for_user(user)
         record_account_event(

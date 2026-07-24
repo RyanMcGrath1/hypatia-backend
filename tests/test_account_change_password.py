@@ -6,13 +6,20 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pyotp
 from sqlalchemy import func, select
 
-from hypatia.models import AccountEvent, Session, User
+from hypatia.models import AccountEvent, MfaLoginChallenge, Session, TOTPMethod, User
 from hypatia.services.account import change_user_password
 from hypatia.services.auth.constants import (
+    EVENT_LOGIN_SUCCESS,
     EVENT_PASSWORD_CHANGED,
+    INVALID_CREDENTIALS_MESSAGE,
     UNAUTHENTICATED_MESSAGE,
+)
+from hypatia.services.auth.mfa_challenge import (
+    create_mfa_login_challenge,
+    hash_mfa_challenge_token,
 )
 from hypatia.services.auth.passwords import verify_password
 from hypatia.services.auth.sessions import (
@@ -71,6 +78,61 @@ def _change_password(
         ),
         content_type="application/json",
         headers=auth_headers(token),
+    )
+
+
+def _enroll_totp(client, db_session, user, token: str) -> tuple[str, str]:
+    """Setup + enable TOTP; return (plaintext_secret, new_session_token)."""
+    setup = client.post(
+        "/api/security/totp/setup",
+        data=json.dumps({"current_password": OLD_PASSWORD}),
+        content_type="application/json",
+        headers=auth_headers(token),
+    )
+    assert setup.status_code == 200
+    secret = setup.get_json()["manual_entry_key"]
+    code = pyotp.TOTP(secret, digits=6, interval=30).now()
+    enabled = client.post(
+        "/api/security/totp/enable",
+        data=json.dumps({"code": code}),
+        content_type="application/json",
+        headers=auth_headers(token),
+    )
+    assert enabled.status_code == 200
+    db_session.refresh(user)
+    return secret, enabled.get_json()["token"]
+
+
+def _password_login_challenge(client, *, email: str, password: str) -> str:
+    response = client.post(
+        "/api/auth/login",
+        data=json.dumps({"email": email, "password": password}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload is not None
+    assert payload.get("mfa_required") is True
+    assert "token" not in payload
+    challenge = payload.get("challenge_token")
+    assert isinstance(challenge, str) and challenge
+    return challenge
+
+
+def _valid_totp_code(db_session, user, secret: str) -> tuple[str, float]:
+    """Return a TOTP code and mocked time that avoid last_used_timecode replay."""
+    method = db_session.get(TOTPMethod, user.id)
+    assert method is not None
+    assert method.last_used_timecode is not None
+    next_time = (method.last_used_timecode + 1) * 30 + 1
+    return pyotp.TOTP(secret).at(next_time), float(next_time)
+
+
+def _complete_totp(client, *, challenge_token: str, code: str):
+    return client.post(
+        "/api/auth/login/totp",
+        data=json.dumps({"challenge_token": challenge_token, "code": code}),
+        content_type="application/json",
     )
 
 
@@ -410,7 +472,9 @@ def test_failure_during_replacement_session_rolls_back(client, db_session) -> No
     current_session = validate_session(token).session
     assert current_session is not None
     other_token, _other_session = create_session(user)
+    challenge_token = create_mfa_login_challenge(user)
     db_session.commit()
+    challenge_hash = hash_mfa_challenge_token(challenge_token)
 
     with patch(
         "hypatia.services.account.password.create_session",
@@ -440,6 +504,194 @@ def test_failure_during_replacement_session_rolls_back(client, db_session) -> No
             AccountEvent.event_type == EVENT_PASSWORD_CHANGED
         )
     ) == 0
+    # MFA challenge invalidation must roll back with the password change.
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(MfaLoginChallenge.token_hash == challenge_hash)
+        )
+        is not None
+    )
+
+
+# --- MFA login challenge invalidation ---
+
+
+def test_password_change_invalidates_outstanding_mfa_challenge(client, db_session) -> None:
+    """Audit finding: old MFA challenge must not mint a Session after password change."""
+    user, token = _auth_client_for(client, db_session)
+    secret, session_token = _enroll_totp(client, db_session, user, token)
+
+    for event in list(
+        db_session.scalars(
+            select(AccountEvent).where(AccountEvent.user_id == user.id)
+        ).all()
+    ):
+        if event.event_type == EVENT_LOGIN_SUCCESS:
+            db_session.delete(event)
+    db_session.commit()
+
+    challenge = _password_login_challenge(
+        client, email="user@example.com", password=OLD_PASSWORD
+    )
+    sessions_before = db_session.scalar(
+        select(func.count())
+        .select_from(Session)
+        .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+    )
+
+    change = _change_password(client, session_token)
+    assert change.status_code == 200
+    payload = change.get_json()
+    assert set(payload.keys()) == {"message", "token", "password_changed_at"}
+    assert payload["message"] == "Password changed successfully"
+    assert payload["token"]
+    assert payload["password_changed_at"]
+
+    code, mocked_time = _valid_totp_code(db_session, user, secret)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        complete = _complete_totp(client, challenge_token=challenge, code=code)
+
+    assert complete.status_code == 401
+    assert complete.get_json() == {"error": INVALID_CREDENTIALS_MESSAGE}
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge)
+            )
+        )
+        is None
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Session)
+            .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+        )
+        == 1
+    )
+    # Replacement session from password change only — not from the old challenge.
+    assert sessions_before == 1
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(AccountEvent)
+            .where(
+                AccountEvent.user_id == user.id,
+                AccountEvent.event_type == EVENT_LOGIN_SUCCESS,
+            )
+        )
+        == 0
+    )
+
+
+def test_password_change_invalidates_all_outstanding_mfa_challenges(
+    client, db_session
+) -> None:
+    user, token = _auth_client_for(client, db_session)
+    secret, session_token = _enroll_totp(client, db_session, user, token)
+
+    challenge_a = _password_login_challenge(
+        client, email="user@example.com", password=OLD_PASSWORD
+    )
+    challenge_b = _password_login_challenge(
+        client, email="user@example.com", password=OLD_PASSWORD
+    )
+    assert challenge_a != challenge_b
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user.id)
+        )
+        == 2
+    )
+
+    change = _change_password(client, session_token)
+    assert change.status_code == 200
+
+    code, mocked_time = _valid_totp_code(db_session, user, secret)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        for challenge in (challenge_a, challenge_b):
+            complete = _complete_totp(client, challenge_token=challenge, code=code)
+            assert complete.status_code == 401
+            assert complete.get_json() == {"error": INVALID_CREDENTIALS_MESSAGE}
+
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(MfaLoginChallenge)
+            .where(MfaLoginChallenge.user_id == user.id)
+        )
+        == 0
+    )
+
+
+def test_password_change_does_not_invalidate_other_users_mfa_challenge(
+    client, db_session
+) -> None:
+    user_a, token_a = _auth_client_for(
+        client,
+        db_session,
+        email="usera@example.com",
+    )
+    _secret_a, session_a = _enroll_totp(client, db_session, user_a, token_a)
+
+    user_b, token_b = _auth_client_for(
+        client,
+        db_session,
+        email="userb@example.com",
+    )
+    secret_b, _session_b = _enroll_totp(client, db_session, user_b, token_b)
+    challenge_b = _password_login_challenge(
+        client, email="userb@example.com", password=OLD_PASSWORD
+    )
+
+    change = _change_password(client, session_a)
+    assert change.status_code == 200
+
+    assert (
+        db_session.scalar(
+            select(MfaLoginChallenge).where(
+                MfaLoginChallenge.token_hash == hash_mfa_challenge_token(challenge_b)
+            )
+        )
+        is not None
+    )
+
+    code, mocked_time = _valid_totp_code(db_session, user_b, secret_b)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        complete = _complete_totp(client, challenge_token=challenge_b, code=code)
+    assert complete.status_code == 200
+    assert validate_session(complete.get_json()["token"]).valid is True
+
+
+def test_normal_totp_login_still_works_without_password_change(
+    client, db_session
+) -> None:
+    user, token = _auth_client_for(client, db_session)
+    secret, _session_token = _enroll_totp(client, db_session, user, token)
+    challenge = _password_login_challenge(
+        client, email="user@example.com", password=OLD_PASSWORD
+    )
+
+    code, mocked_time = _valid_totp_code(db_session, user, secret)
+    with patch(
+        "hypatia.services.security.totp_verify.time.time",
+        return_value=mocked_time,
+    ):
+        complete = _complete_totp(client, challenge_token=challenge, code=code)
+
+    assert complete.status_code == 200
+    assert validate_session(complete.get_json()["token"]).valid is True
 
 
 # --- Profile compatibility ---

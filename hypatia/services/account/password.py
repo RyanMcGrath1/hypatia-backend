@@ -14,6 +14,7 @@ from hypatia.extensions import db
 from hypatia.models import Session, User
 from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import EVENT_PASSWORD_CHANGED
+from hypatia.services.auth.mfa_challenge import delete_mfa_login_challenges_for_user
 from hypatia.services.auth.passwords import hash_password, verify_password
 from hypatia.services.auth.sessions import create_session, revoke_all_sessions_for_user
 from hypatia.services.auth.validation import validate_password
@@ -60,9 +61,10 @@ def change_user_password(
 
     Identity comes from ``user`` / ``current_session`` (authenticated request
     context), never from client-supplied user ids. On success: update hash,
-    set ``password_changed_at``, revoke all sessions (including
-    ``current_session``), create one replacement session, and record
-    ``PASSWORD_CHANGED`` — all in one database transaction.
+    set ``password_changed_at``, invalidate outstanding MFA login challenges,
+    revoke all sessions (including ``current_session``), create one
+    replacement session, and record ``PASSWORD_CHANGED`` — all in one
+    database transaction.
     """
     if current_session.user_id != user.id:
         raise ValueError("current_session does not belong to user")
@@ -81,6 +83,7 @@ def change_user_password(
     try:
         user.password_hash = hash_password(new_password)
         user.password_changed_at = now
+        delete_mfa_login_challenges_for_user(user.id)
         revoke_all_sessions_for_user(user)
         raw_token, _new_session = create_session(user)
         record_account_event(
