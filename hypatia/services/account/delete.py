@@ -3,6 +3,12 @@
 Physically retaining the User row as a tombstone while scrubbing credentials,
 personal data, and security state. Notification email is sent only after a
 successful commit; delivery failure does not undo deletion.
+
+AccountEvent rows (including ACCOUNT_DELETED) are retained with the tombstone.
+Soft deletion must not remove audit history. If scheduled physical deletion of
+User tombstones is implemented later, audit-log retention and the
+``account_events.user_id`` FK ``ON DELETE CASCADE`` behavior must be revisited
+before hard deletes are enabled.
 """
 
 from __future__ import annotations
@@ -16,13 +22,13 @@ from sqlalchemy import select
 
 from hypatia.extensions import db
 from hypatia.models import (
-    AccountEvent,
     EmailChangeRequest,
     MfaLoginChallenge,
     Profile,
     Session,
     User,
 )
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_DELETED,
     EVENT_ACCOUNT_DELETED,
@@ -68,16 +74,6 @@ class DeleteAccountResult:
     error: str | None = None
 
 
-def _record_account_deleted(*, user_id, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=EVENT_ACCOUNT_DELETED,
-            ip_address=ip_address,
-        )
-    )
-
-
 def _delete_email_change_requests(user_id) -> None:
     rows = db.session.scalars(
         select(EmailChangeRequest).where(EmailChangeRequest.user_id == user_id)
@@ -117,13 +113,16 @@ def delete_account(
     totp_code: str | None = None,
     totp_code_provided: bool = False,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> DeleteAccountResult:
     """Soft-delete and anonymize ``user`` after password (and TOTP) reauth.
 
     Identity comes from ``user`` / ``current_session`` only. On success the
     User row is retained as a tombstone; Profile and security rows are removed;
     all sessions are revoked; and ``ACCOUNT_DELETED`` is recorded — all in one
-    transaction. The original email is notified after commit.
+    transaction. Prior ``AccountEvent`` rows remain attached to the tombstone.
+    The original email is notified after commit.
     """
     if current_session.user_id != user.id:
         raise ValueError("current_session does not belong to user")
@@ -185,7 +184,13 @@ def delete_account(
         _delete_mfa_login_challenges(user.id)
         _delete_email_change_requests(user.id)
         revoke_all_sessions_for_user(user)
-        _record_account_deleted(user_id=user.id, ip_address=ip_address)
+        record_account_event(
+            user,
+            EVENT_ACCOUNT_DELETED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
         db.session.commit()
     except Exception:
         db.session.rollback()

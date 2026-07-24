@@ -20,8 +20,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, EmailChangeRequest, User
+from hypatia.models import EmailChangeRequest, User
 from hypatia.services.account.password import CURRENT_PASSWORD_INCORRECT_MESSAGE
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_ACTIVE,
     EMAIL_ALREADY_REGISTERED_MESSAGE,
@@ -115,16 +116,6 @@ def _delete_pending_requests_for_user(user_id) -> None:
         db.session.delete(row)
 
 
-def _record_event(*, user_id, event_type: str, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=event_type,
-            ip_address=ip_address,
-        )
-    )
-
-
 def _old_confirmation_body(*, new_email: str, verify_url: str) -> str:
     return (
         "A request was made to change the email address on your Hypatia account "
@@ -168,6 +159,8 @@ def request_email_change(
     new_email: str,
     current_password: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> RequestEmailChangeResult:
     """Start dual-confirmation email change for the authenticated user.
 
@@ -260,10 +253,12 @@ def request_email_change(
         )
 
     try:
-        _record_event(
-            user_id=user.id,
-            event_type=EVENT_EMAIL_CHANGE_REQUESTED,
+        record_account_event(
+            user,
+            EVENT_EMAIL_CHANGE_REQUESTED,
             ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         db.session.commit()
     except Exception:
@@ -286,6 +281,8 @@ def _complete_email_change(
     *,
     now: datetime,
     ip_address: str | None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> VerifyEmailChangeResult | None:
     """Apply the email change when both sides are confirmed.
 
@@ -321,10 +318,12 @@ def _complete_email_change(
     user.email_verified = True
     request.completed_at = now
     revoke_all_sessions_for_user(user)
-    _record_event(
-        user_id=user.id,
-        event_type=EVENT_EMAIL_CHANGED,
+    record_account_event(
+        user,
+        EVENT_EMAIL_CHANGED,
         ip_address=ip_address,
+        request_id=request_id,
+        user_agent=user_agent,
     )
 
     try:
@@ -361,6 +360,8 @@ def verify_email_change(
     *,
     raw_token: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> VerifyEmailChangeResult:
     """Confirm one side of a pending email change, or complete when both done.
 
@@ -418,7 +419,11 @@ def verify_email_change(
                 ok=False, error=INVALID_VERIFICATION_TOKEN_MESSAGE
             )
         completion_error = _complete_email_change(
-            request, now=now, ip_address=ip_address
+            request,
+            now=now,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         if completion_error is not None:
             return completion_error

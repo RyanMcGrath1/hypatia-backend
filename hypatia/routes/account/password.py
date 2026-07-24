@@ -6,6 +6,7 @@ from flask import g, jsonify, request
 
 from hypatia.routes.account import bp
 from hypatia.services.account import change_user_password
+from hypatia.services.audit import get_audit_request_context
 from hypatia.utils.auth import auth_required
 
 
@@ -37,6 +38,7 @@ def change_password():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     # Do not trim or normalize any password field.
     result = change_user_password(
         g.current_user,
@@ -44,7 +46,7 @@ def change_password():
         current_password=data["current_password"],
         new_password=data["new_password"],
         confirm_new_password=data["confirm_new_password"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         # 400: request is already authenticated; this is a field/credential

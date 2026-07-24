@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from flask import current_app
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, Session, TOTPMethod, User
+from hypatia.models import Session, TOTPMethod, User
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import EVENT_TOTP_DISABLED, EVENT_TOTP_ENABLED
 from hypatia.services.auth.passwords import verify_password
 from hypatia.services.auth.sessions import create_session, revoke_all_sessions_for_user
@@ -81,16 +82,6 @@ class TotpDisableResult:
 
 def _issuer_name() -> str:
     return str(current_app.config.get("TOTP_ISSUER_NAME", "Hypatia") or "Hypatia")
-
-
-def _record_event(*, user_id, event_type: str, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=event_type,
-            ip_address=ip_address,
-        )
-    )
 
 
 def _send_security_notification(*, to_address: str, subject: str, text_body: str) -> None:
@@ -162,6 +153,8 @@ def enable_totp(
     *,
     code: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> TotpEnableResult:
     """Confirm pending TOTP setup, enable MFA, and rotate sessions."""
     if current_session.user_id != user.id:
@@ -190,7 +183,13 @@ def enable_totp(
         method.enabled = True
         method.verified_at = now
         method.last_used_timecode = verification.matched_timecode
-        _record_event(user_id=user.id, event_type=EVENT_TOTP_ENABLED, ip_address=ip_address)
+        record_account_event(
+            user,
+            EVENT_TOTP_ENABLED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
         revoke_all_sessions_for_user(user)
         raw_token, _new_session = create_session(user)
         db.session.commit()
@@ -213,6 +212,8 @@ def disable_totp(
     current_password: str,
     code: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> TotpDisableResult:
     """Disable TOTP after password + current code reauthentication."""
     if current_session.user_id != user.id:
@@ -244,7 +245,13 @@ def disable_totp(
         # the row is then removed so the encrypted secret leaves active storage.
         method.last_used_timecode = verification.matched_timecode
         db.session.delete(method)
-        _record_event(user_id=user.id, event_type=EVENT_TOTP_DISABLED, ip_address=ip_address)
+        record_account_event(
+            user,
+            EVENT_TOTP_DISABLED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
         revoke_all_sessions_for_user(user)
         raw_token, _new_session = create_session(user)
         db.session.commit()

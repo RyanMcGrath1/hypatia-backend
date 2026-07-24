@@ -16,7 +16,8 @@ from flask import current_app
 from sqlalchemy import select
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, MfaLoginChallenge, User
+from hypatia.models import MfaLoginChallenge, User
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_ACTIVE,
     EVENT_LOGIN_FAILED,
@@ -74,16 +75,6 @@ def create_mfa_login_challenge(user: User) -> str:
     return raw_token
 
 
-def _record_login_event(*, user_id, event_type: str, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=event_type,
-            ip_address=ip_address,
-        )
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class CompleteTotpLoginResult:
     ok: bool
@@ -96,6 +87,8 @@ def complete_totp_login(
     challenge_token: str,
     code: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> CompleteTotpLoginResult:
     """Complete MFA login using a challenge token + TOTP code.
 
@@ -137,10 +130,12 @@ def complete_totp_login(
     )
     if not verification.ok or verification.matched_timecode is None:
         challenge.attempt_count += 1
-        _record_login_event(
-            user_id=user.id,
-            event_type=EVENT_LOGIN_FAILED,
+        record_account_event(
+            user,
+            EVENT_LOGIN_FAILED,
             ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         try:
             db.session.commit()
@@ -153,10 +148,12 @@ def complete_totp_login(
         challenge.consumed_at = now
         method.last_used_timecode = verification.matched_timecode
         user.last_login_at = now
-        _record_login_event(
-            user_id=user.id,
-            event_type=EVENT_LOGIN_SUCCESS,
+        record_account_event(
+            user,
+            EVENT_LOGIN_SUCCESS,
             ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         raw_token, _session = create_session(user)
         db.session.commit()

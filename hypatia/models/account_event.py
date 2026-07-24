@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from hypatia.models.user import User
 
 
+# Bounds for audit metadata columns (must match migration).
+REQUEST_ID_MAX_LENGTH = 64
+USER_AGENT_MAX_LENGTH = 512
+
+
 class AccountEvent(db.Model):
     __tablename__ = "account_events"
 
@@ -32,6 +37,11 @@ class AccountEvent(db.Model):
     )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     ip_address: Mapped[str | None] = mapped_column(String(45))
+    request_id: Mapped[str | None] = mapped_column(
+        String(REQUEST_ID_MAX_LENGTH),
+        index=True,
+    )
+    user_agent: Mapped[str | None] = mapped_column(String(USER_AGENT_MAX_LENGTH))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

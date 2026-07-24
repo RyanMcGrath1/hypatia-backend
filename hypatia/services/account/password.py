@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, Session, User
+from hypatia.models import Session, User
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import EVENT_PASSWORD_CHANGED
 from hypatia.services.auth.passwords import hash_password, verify_password
 from hypatia.services.auth.sessions import create_session, revoke_all_sessions_for_user
@@ -44,16 +45,6 @@ class ChangePasswordResult:
     password_changed_at: str | None = None
 
 
-def _record_password_changed(*, user_id, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=EVENT_PASSWORD_CHANGED,
-            ip_address=ip_address,
-        )
-    )
-
-
 def change_user_password(
     user: User,
     current_session: Session,
@@ -62,6 +53,8 @@ def change_user_password(
     new_password: str,
     confirm_new_password: str,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> ChangePasswordResult:
     """Verify the current password, set a new one, and rotate all sessions.
 
@@ -90,7 +83,13 @@ def change_user_password(
         user.password_changed_at = now
         revoke_all_sessions_for_user(user)
         raw_token, _new_session = create_session(user)
-        _record_password_changed(user_id=user.id, ip_address=ip_address)
+        record_account_event(
+            user,
+            EVENT_PASSWORD_CHANGED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
         db.session.commit()
     except Exception:
         db.session.rollback()

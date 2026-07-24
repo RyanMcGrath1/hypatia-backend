@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, User
+from hypatia.models import User
+from hypatia.services.audit import log_security_event, record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_ACTIVE,
     EVENT_LOGIN_FAILED,
@@ -35,26 +36,13 @@ def _find_user_by_email(email: str) -> User | None:
     return db.session.scalar(select(User).where(func.lower(User.email) == normalized))
 
 
-def _record_account_event(
-    *,
-    user_id,
-    event_type: str,
-    ip_address: str | None,
-) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=event_type,
-            ip_address=ip_address,
-        )
-    )
-
-
 def authenticate_user(
     email: str,
     password: str,
     *,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
     commit: bool = True,
 ) -> AuthenticationResult:
     """Authenticate by email/password. Failures do not reveal whether the email exists.
@@ -63,27 +51,39 @@ def authenticate_user(
     login: ``LOGIN_SUCCESS`` and ``last_login_at`` are deferred until MFA
     succeeds. Argon2 maintenance rehash may still occur on password success.
 
+    Unknown-email failures are logged via ``hypatia.security`` (no ``AccountEvent``)
+    so attempted emails are never stored in audit rows.
+
     Decision: do not gate login on ``email_verified`` until email verification exists.
     An ``email_verified`` check may be added here when that feature is implemented.
     """
     user = _find_user_by_email(email)
     if user is None:
+        log_security_event(
+            EVENT_LOGIN_FAILED,
+            ip_address=ip_address,
+            request_id=request_id,
+        )
         return AuthenticationResult(success=False)
 
     if user.account_status != ACCOUNT_STATUS_ACTIVE:
-        _record_account_event(
-            user_id=user.id,
-            event_type=EVENT_LOGIN_FAILED,
+        record_account_event(
+            user,
+            EVENT_LOGIN_FAILED,
             ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         db.session.commit()
         return AuthenticationResult(success=False)
 
     if not verify_password(user.password_hash, password):
-        _record_account_event(
-            user_id=user.id,
-            event_type=EVENT_LOGIN_FAILED,
+        record_account_event(
+            user,
+            EVENT_LOGIN_FAILED,
             ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
         )
         db.session.commit()
         return AuthenticationResult(success=False)
@@ -101,10 +101,12 @@ def authenticate_user(
         return AuthenticationResult(success=True, user=user, mfa_required=True)
 
     user.last_login_at = _utcnow()
-    _record_account_event(
-        user_id=user.id,
-        event_type=EVENT_LOGIN_SUCCESS,
+    record_account_event(
+        user,
+        EVENT_LOGIN_SUCCESS,
         ip_address=ip_address,
+        request_id=request_id,
+        user_agent=user_agent,
     )
     if commit:
         db.session.commit()

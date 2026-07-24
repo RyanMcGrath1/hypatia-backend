@@ -6,6 +6,7 @@ from flask import g, jsonify, request
 
 from hypatia.routes.account import bp
 from hypatia.services.account import request_email_change, verify_email_change
+from hypatia.services.audit import get_audit_request_context
 from hypatia.utils.auth import auth_required
 
 
@@ -32,12 +33,13 @@ def change_email():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     # Do not trim current_password; new_email is normalized in the service.
     result = request_email_change(
         g.current_user,
         new_email=data["new_email"],
         current_password=data["current_password"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         if result.delivery_failed:
@@ -65,9 +67,10 @@ def verify_change_email():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     result = verify_email_change(
         raw_token=data["token"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         if result.conflict:

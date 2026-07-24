@@ -12,7 +12,8 @@ from sqlalchemy import select
 
 from hypatia.extensions import db
 from hypatia.models import Session, User
-from hypatia.services.auth.constants import ACCOUNT_STATUS_ACTIVE
+from hypatia.services.audit import record_account_event
+from hypatia.services.auth.constants import ACCOUNT_STATUS_ACTIVE, EVENT_LOGOUT
 
 TOKEN_RANDOM_BYTES = 32
 # Persist last_active_at at most once per interval to limit write load on hot sessions.
@@ -108,6 +109,31 @@ def validate_session(raw_token: str) -> SessionValidationResult:
 def revoke_session(session: Session) -> None:
     """Mark ``session`` revoked (caller commits)."""
     session.revoked_at = _utcnow()
+
+
+def logout_session(
+    user: User,
+    session: Session,
+    *,
+    ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    """Revoke ``session`` and record ``LOGOUT`` on the current transaction.
+
+    Does not commit — protected routes typically commit via ``auth_required``.
+    """
+    if session.user_id != user.id:
+        raise ValueError("session does not belong to user")
+
+    revoke_session(session)
+    record_account_event(
+        user,
+        EVENT_LOGOUT,
+        ip_address=ip_address,
+        request_id=request_id,
+        user_agent=user_agent,
+    )
 
 
 def revoke_all_sessions_for_user(user: User) -> None:

@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from hypatia.extensions import db
-from hypatia.models import AccountEvent, Profile, User
+from hypatia.models import Profile, User
+from hypatia.services.audit import record_account_event
 from hypatia.services.auth.constants import (
     ACCOUNT_STATUS_ACTIVE,
     EMAIL_ALREADY_REGISTERED_MESSAGE,
@@ -52,16 +53,6 @@ def _email_already_registered(normalized_email: str) -> bool:
     return existing is not None
 
 
-def _record_account_created(*, user_id, ip_address: str | None) -> None:
-    db.session.add(
-        AccountEvent(
-            user_id=user_id,
-            event_type=EVENT_ACCOUNT_CREATED,
-            ip_address=ip_address,
-        )
-    )
-
-
 def register_user(
     email: str,
     password: str,
@@ -69,6 +60,8 @@ def register_user(
     last_name: str,
     *,
     ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
 ) -> RegistrationResult:
     """Create User + Profile + session atomically and return the raw session token.
 
@@ -122,7 +115,13 @@ def register_user(
                 last_name=trimmed_last,
             )
         )
-        _record_account_created(user_id=user.id, ip_address=ip_address)
+        record_account_event(
+            user,
+            EVENT_ACCOUNT_CREATED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
         raw_token, _session = create_session(user)
         db.session.commit()
     except IntegrityError:

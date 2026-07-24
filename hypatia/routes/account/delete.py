@@ -10,6 +10,7 @@ from hypatia.services.account import (
     CONFIRMATION_REQUIRED_MESSAGE,
     delete_account,
 )
+from hypatia.services.audit import get_audit_request_context
 from hypatia.utils.auth import auth_required
 
 
@@ -49,6 +50,7 @@ def delete_account_route():
     if totp_code_provided and not isinstance(totp_code, str):
         return jsonify({"error": "totp_code must be a string"}), 400
 
+    audit = get_audit_request_context()
     # Do not trim confirmation or password fields.
     result = delete_account(
         g.current_user,
@@ -57,7 +59,7 @@ def delete_account_route():
         confirmation=data["confirmation"],
         totp_code=totp_code if totp_code_provided else None,
         totp_code_provided=totp_code_provided,
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         return jsonify({"error": result.error}), 400

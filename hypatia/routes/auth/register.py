@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from hypatia.routes.auth import bp
+from hypatia.services.audit import get_audit_request_context
 from hypatia.services.auth.registration import register_user
 
 
@@ -36,12 +37,13 @@ def register():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     result = register_user(
         data["email"],
         data["password"],
         data["first_name"],
         data["last_name"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         status = 409 if result.conflict else 400

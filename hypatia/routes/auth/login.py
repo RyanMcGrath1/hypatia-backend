@@ -6,6 +6,7 @@ from flask import jsonify, request
 
 from hypatia.extensions import db
 from hypatia.routes.auth import bp
+from hypatia.services.audit import get_audit_request_context
 from hypatia.services.auth.authentication import authenticate_user
 from hypatia.services.auth.constants import INVALID_CREDENTIALS_MESSAGE
 from hypatia.services.auth.mfa_challenge import complete_totp_login, create_mfa_login_challenge
@@ -36,11 +37,12 @@ def login():
     assert isinstance(data, dict)
     email: str = data["email"]
     password: str = data["password"]
+    audit = get_audit_request_context()
 
     result = authenticate_user(
         email,
         password,
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
         commit=False,
     )
     if not result.success or result.user is None:
@@ -72,10 +74,11 @@ def login_totp():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     result = complete_totp_login(
         challenge_token=data["challenge_token"],
         code=data["code"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok or result.raw_token is None:
         return jsonify({"error": result.error or INVALID_CREDENTIALS_MESSAGE}), 401

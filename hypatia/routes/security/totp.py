@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import g, jsonify, request
 
 from hypatia.routes.security import bp
+from hypatia.services.audit import get_audit_request_context
 from hypatia.services.security import disable_totp, enable_totp, setup_totp
 from hypatia.utils.auth import auth_required
 
@@ -54,11 +55,12 @@ def totp_enable():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     result = enable_totp(
         g.current_user,
         g.current_session,
         code=data["code"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         return jsonify({"error": result.error}), 400
@@ -82,12 +84,13 @@ def totp_disable():
         return jsonify({"error": field_errors[0]}), 400
 
     assert isinstance(data, dict)
+    audit = get_audit_request_context()
     result = disable_totp(
         g.current_user,
         g.current_session,
         current_password=data["current_password"],
         code=data["code"],
-        ip_address=request.remote_addr,
+        **audit.as_kwargs(),
     )
     if not result.ok:
         return jsonify({"error": result.error}), 400

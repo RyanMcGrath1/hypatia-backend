@@ -8,7 +8,7 @@ Flask API for Hypatia (FRED-backed economy dashboard, OpenFEC candidate name sea
 |------|------|
 | [app.py](app.py) | Dev entrypoint: `create_app()` + `python app.py` (re-exports `app` for `flask --app app`). |
 | [wsgi.py](wsgi.py) | WSGI entry: `application = create_app()` for Gunicorn (`wsgi:application` or alias `wsgi:app`). |
-| [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)). Cross-cutting helpers under [utils/](hypatia/utils/): [settings](hypatia/utils/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/utils/cors.py), [logging](hypatia/utils/logging_config.py), [HTTP helpers](hypatia/utils/http.py), [JSON error handlers](hypatia/utils/error_handlers.py). |
+| [hypatia/](hypatia/__init__.py) | Application factory ([`create_app`](hypatia/__init__.py)). Cross-cutting helpers under [utils/](hypatia/utils/): [settings](hypatia/utils/settings.py) (`development` / `production` / `testing`), [CORS](hypatia/utils/cors.py), [logging](hypatia/utils/logging_config.py), [HTTP helpers](hypatia/utils/http.py), [JSON error handlers](hypatia/utils/error_handlers.py). Application vs account-audit vs security logging: [docs/LOGGING_AND_AUDIT.md](docs/LOGGING_AND_AUDIT.md). |
 | [hypatia/routes/](hypatia/routes/__init__.py) | Flask blueprints grouped like Expo `hooks/api/` (see [docs/API_STRUCTURE.md](docs/API_STRUCTURE.md)). |
 | [hypatia/services/](hypatia/services/) | Domain logic and upstream clients (FRED economy, GNews). |
 | [economy.py](economy.py), [news.py](news.py) | Re-export shims for tests/legacy imports (implementation in `hypatia/services/`). |
