@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from flask import Flask
 
+from hypatia.routes.account import bp as account_bp
 from hypatia.routes.auth import bp as auth_bp
 from hypatia.routes.economy import bp as economy_bp
 from hypatia.routes.fec import bp as fec_bp
@@ -17,5 +18,13 @@ from hypatia.routes.profile import bp as profile_bp
 
 
 def register_blueprints(app: Flask) -> None:
-    for blueprint in (health_bp, auth_bp, profile_bp, fec_bp, economy_bp, news_bp):
+    for blueprint in (
+        health_bp,
+        auth_bp,
+        profile_bp,
+        account_bp,
+        fec_bp,
+        economy_bp,
+        news_bp,
+    ):
         app.register_blueprint(blueprint)

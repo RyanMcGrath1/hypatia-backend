@@ -108,3 +108,16 @@ def validate_session(raw_token: str) -> SessionValidationResult:
 def revoke_session(session: Session) -> None:
     """Mark ``session`` revoked (caller commits)."""
     session.revoked_at = _utcnow()
+
+
+def revoke_all_sessions_for_user(user: User) -> None:
+    """Revoke every non-revoked session for ``user`` (caller commits)."""
+    sessions = db.session.scalars(
+        select(Session).where(
+            Session.user_id == user.id,
+            Session.revoked_at.is_(None),
+        )
+    ).all()
+    now = _utcnow()
+    for session in sessions:
+        session.revoked_at = now

@@ -1,10 +1,15 @@
-"""Password validation for registration and future password-change flows."""
+"""Password validation for registration and password-change flows.
+
+Minimum length follows NIST SP 800-63B guidance for accounts without MFA
+(15 characters). No composition rules; spaces allowed; passwords are never
+trimmed or normalized.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-MIN_PASSWORD_LENGTH = 12
+MIN_PASSWORD_LENGTH = 15
 
 
 @dataclass(frozen=True, slots=True)

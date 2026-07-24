@@ -106,7 +106,7 @@ def test_invalid_password_rejected(client, db_session) -> None:
     )
 
     assert response.status_code == 400
-    assert "12" in response.get_json()["error"]
+    assert "15" in response.get_json()["error"]
     assert db_session.scalar(select(func.count()).select_from(User)) == 0
 
 
