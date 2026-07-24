@@ -49,6 +49,7 @@ class User(db.Model):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     profile: Mapped[Profile | None] = relationship(
         back_populates="user",

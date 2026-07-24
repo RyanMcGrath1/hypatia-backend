@@ -1,5 +1,16 @@
 """Account services for the authenticated current user."""
 
+from hypatia.services.account.delete import (
+    ACCOUNT_DELETED_MESSAGE,
+    CONFIRMATION_INVALID_MESSAGE,
+    CONFIRMATION_REQUIRED_MESSAGE,
+    DELETE_CONFIRMATION_TEXT,
+    TOTP_CODE_NOT_APPLICABLE_MESSAGE,
+    TOTP_CODE_REQUIRED_MESSAGE,
+    DeleteAccountResult,
+    anonymized_deleted_email,
+    delete_account,
+)
 from hypatia.services.account.email_change import (
     EMAIL_CHANGE_COMPLETE_MESSAGE,
     EMAIL_CHANGE_CONFIRMATION_MESSAGE,
@@ -22,18 +33,27 @@ from hypatia.services.account.password import (
 )
 
 __all__ = [
+    "ACCOUNT_DELETED_MESSAGE",
+    "CONFIRMATION_INVALID_MESSAGE",
+    "CONFIRMATION_REQUIRED_MESSAGE",
     "CURRENT_PASSWORD_INCORRECT_MESSAGE",
+    "DELETE_CONFIRMATION_TEXT",
     "EMAIL_CHANGE_COMPLETE_MESSAGE",
     "EMAIL_CHANGE_CONFIRMATION_MESSAGE",
     "EMAIL_DELIVERY_FAILED_MESSAGE",
     "INVALID_VERIFICATION_TOKEN_MESSAGE",
     "NEW_EMAIL_SAME_AS_CURRENT_MESSAGE",
     "NEW_PASSWORDS_DO_NOT_MATCH_MESSAGE",
+    "TOTP_CODE_NOT_APPLICABLE_MESSAGE",
+    "TOTP_CODE_REQUIRED_MESSAGE",
     "ChangePasswordResult",
+    "DeleteAccountResult",
     "RequestEmailChangeResult",
     "VerifyEmailChangeResult",
+    "anonymized_deleted_email",
     "build_email_change_verify_url",
     "change_user_password",
+    "delete_account",
     "generate_email_change_token",
     "hash_email_change_token",
     "request_email_change",
