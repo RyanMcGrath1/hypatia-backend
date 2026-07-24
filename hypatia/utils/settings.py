@@ -53,9 +53,29 @@ class Config:
     ENV_OPENFEC = "OPENFEC_API_KEY"
     ENV_DATABASE_URL = "DATABASE_URL"
     ENV_AUTH_SESSION_TTL_DAYS = "AUTH_SESSION_TTL_DAYS"
+    ENV_SMTP_HOST = "SMTP_HOST"
+    ENV_SMTP_PORT = "SMTP_PORT"
+    ENV_SMTP_USERNAME = "SMTP_USERNAME"
+    ENV_SMTP_PASSWORD = "SMTP_PASSWORD"
+    ENV_SMTP_SECURITY = "SMTP_SECURITY"
+    ENV_EMAIL_FROM_ADDRESS = "EMAIL_FROM_ADDRESS"
+    ENV_EMAIL_FROM_NAME = "EMAIL_FROM_NAME"
 
     # Auth sessions (opaque Bearer tokens; TTL enforced server-side)
     AUTH_SESSION_TTL_DAYS = env_int(ENV_AUTH_SESSION_TTL_DAYS, default=30)
+
+    # Outbound transactional email (SMTP). Resolved/validated at send time so
+    # missing values raise EMAIL_NOT_CONFIGURED instead of attribute errors.
+    # SMTP_SECURITY: starttls | ssl | none (default starttls; do not use none in
+    # production unless deliberately configured for a trusted relay).
+    SMTP_HOST = os.environ.get(ENV_SMTP_HOST, "")
+    SMTP_PORT = os.environ.get(ENV_SMTP_PORT, "")
+    SMTP_USERNAME = os.environ.get(ENV_SMTP_USERNAME, "")
+    SMTP_PASSWORD = os.environ.get(ENV_SMTP_PASSWORD, "")
+    SMTP_SECURITY = os.environ.get(ENV_SMTP_SECURITY, "starttls")
+    EMAIL_FROM_ADDRESS = os.environ.get(ENV_EMAIL_FROM_ADDRESS, "")
+    EMAIL_FROM_NAME = os.environ.get(ENV_EMAIL_FROM_NAME, "")
+    SMTP_TIMEOUT_S = 30
 
     # SQLAlchemy (Flask-SQLAlchemy reads these from ``app.config``)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
