@@ -8,6 +8,12 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_DEV_SQLITE_URI = f"sqlite:///{(_PROJECT_ROOT / 'hypatia.db').as_posix()}"
 
+# Local/dev fallback only. Production must never start with this value.
+INSECURE_DEVELOPMENT_SECRET_KEY = "dev-insecure-change-me"
+SECRET_KEY_PRODUCTION_REQUIRED_MESSAGE = (
+    "SECRET_KEY must be explicitly configured for production."
+)
+
 
 def truthy_from_str(raw: str | None, *, default: bool = False) -> bool:
     """True for common affirmative strings (env vars, query flags, form fields)."""
@@ -33,11 +39,33 @@ def env_int(name: str, *, default: int) -> int:
         return default
 
 
+def resolve_production_secret_key(
+    raw: str | None = None,
+) -> str:
+    """Return a production SECRET_KEY or raise if missing/blank/placeholder.
+
+    Reads ``SECRET_KEY`` from the environment when ``raw`` is omitted so
+    validation runs at app startup (after dotenv), not only at class import.
+    Never includes the secret value in the exception message.
+    """
+    if raw is None:
+        raw = os.environ.get("SECRET_KEY")
+    if raw is None or not str(raw).strip():
+        raise RuntimeError(SECRET_KEY_PRODUCTION_REQUIRED_MESSAGE)
+    secret = str(raw)
+    if secret.strip() == INSECURE_DEVELOPMENT_SECRET_KEY:
+        raise RuntimeError(SECRET_KEY_PRODUCTION_REQUIRED_MESSAGE)
+    return secret
+
+
 class Config:
     """Default settings shared across environments (override in subclasses)."""
 
     # Flask
-    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-insecure-change-me")
+    # Import-time default for development/testing. Production re-resolves and
+    # validates SECRET_KEY at create_app() after dotenv load (see
+    # ``resolve_production_secret_key``).
+    SECRET_KEY = os.environ.get("SECRET_KEY", INSECURE_DEVELOPMENT_SECRET_KEY)
     TESTING = False
     DEBUG = False
     JSON_SORT_KEYS = False
@@ -155,7 +183,12 @@ class DevelopmentConfig(Config):
 
 
 class ProductionConfig(Config):
-    """Production: no debug; set ``SECRET_KEY`` in the environment."""
+    """Production: no debug; requires an explicit non-placeholder ``SECRET_KEY``.
+
+    ``create_app("production")`` re-reads and validates ``SECRET_KEY`` after
+    dotenv load so startup fails closed if the value is missing, blank, or the
+    development placeholder.
+    """
 
     DEBUG = False
     PROPAGATE_EXCEPTIONS = False

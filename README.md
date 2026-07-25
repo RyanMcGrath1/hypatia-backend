@@ -56,7 +56,7 @@ Copy [.env.example](.env.example) to `.env` and set `FRED_API_KEY` (economy rout
 Optional environment variables:
 
 - `HYPATIA_ENV` or `FLASK_ENV` — `development` (default), `production`, or `testing` (pytest uses `testing` via the app factory; not usually set by hand)
-- `SECRET_KEY` — set in production for signed cookies and similar; a dev-only default is used if unset (see [hypatia/utils/settings.py](hypatia/utils/settings.py))
+- `SECRET_KEY` — Flask/security secret (also used as HMAC key material for auth rate-limit account identifiers). Development may omit it and use a local insecure default. **Production requires an explicit non-placeholder value**; `create_app("production")` refuses to start if `SECRET_KEY` is missing, blank, or equal to the development placeholder `dev-insecure-change-me`. Keep it private and consistent across workers/restarts for a deployment (see [hypatia/utils/settings.py](hypatia/utils/settings.py))
 - `AUTH_RATE_LIMIT_STORAGE_URI` — Flask-Limiter storage (default `memory://` for local/dev/tests). **Production multi-worker deployments should use a shared backend** (e.g. `redis://...`) so login/TOTP limits are enforced across processes. Memory storage is not sufficient for multi-instance production.
 - `AUTH_LOGIN_ACCOUNT_LIMIT` / `AUTH_LOGIN_ACCOUNT_WINDOW_MINUTES` — password Login per-account limit (default **10** / **15** minutes; account key is an HMAC of the normalized email)
 - `AUTH_LOGIN_IP_LIMIT` / `AUTH_LOGIN_IP_WINDOW_MINUTES` — password Login per-IP limit (default **30** / **15** minutes; uses `request.remote_addr`)
@@ -112,11 +112,13 @@ flask --app app run --host 0.0.0.0 --port 5001
 
 ## Production (WSGI)
 
-Use [wsgi.py](wsgi.py) with Gunicorn (set `HYPATIA_ENV=production` or `FLASK_ENV=production` and a strong `SECRET_KEY`):
+Use [wsgi.py](wsgi.py) with Gunicorn (set `HYPATIA_ENV=production` or `FLASK_ENV=production` and an explicit `SECRET_KEY`):
 
 ```bash
 gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 ```
+
+Production startup **requires** `SECRET_KEY` to be set to a real deployment secret — not missing, not blank, and not the development placeholder. The same value must be shared across workers/restarts so sessions and HMAC-derived rate-limit keys stay consistent. Do not generate a new random `SECRET_KEY` on every boot.
 
 (`wsgi:app` is an alias of the same object.) A minimal container build is in [Dockerfile](Dockerfile); inject API keys and `SECRET_KEY` at runtime, not into the image.
 
