@@ -49,6 +49,11 @@ def init_cors(app: Flask) -> None:
         app,
         origins=expo_cors_origins(),
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-        allow_headers=["Content-Type", "Accept", "Authorization"],
+        allow_headers=[
+            "Content-Type",
+            "Accept",
+            "Authorization",
+            "X-Request-ID",
+        ],
         expose_headers=["X-Request-ID"],
     )
