@@ -1,4 +1,4 @@
-"""TOTP authenticator-app setup, enable, and disable.
+"""TOTP authenticator-app setup, enable, disable, and incomplete-setup cancel.
 
 Before this feature is production-complete, add an account-recovery mechanism
 (e.g. recovery codes). Without recovery, a user who permanently loses their
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 
@@ -40,6 +40,7 @@ TOTP_SETUP_REQUIRED_MESSAGE = "Authenticator app setup is required first"
 TOTP_NOT_ENABLED_MESSAGE = "Authenticator app is not enabled"
 TOTP_INVALID_CODE_MESSAGE = "Invalid authenticator code"
 TOTP_CONFIGURATION_ERROR_MESSAGE = "Authenticator app is temporarily unavailable"
+TOTP_SETUP_CANCELLED_MESSAGE = "Authenticator setup cancelled"
 
 _ENABLE_NOTIFY_SUBJECT = "Authenticator app enabled on your Hypatia account"
 _DISABLE_NOTIFY_SUBJECT = "Authenticator app disabled on your Hypatia account"
@@ -80,8 +81,33 @@ class TotpDisableResult:
     raw_token: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TotpCancelSetupResult:
+    ok: bool
+    message: str = TOTP_SETUP_CANCELLED_MESSAGE
+
+
 def _issuer_name() -> str:
     return str(current_app.config.get("TOTP_ISSUER_NAME", "Hypatia") or "Hypatia")
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _setup_ttl() -> timedelta:
+    seconds = int(current_app.config.get("TOTP_SETUP_TTL_SECONDS", 900))
+    return timedelta(seconds=max(seconds, 1))
+
+
+def _is_disabled_setup_expired(method: TOTPMethod, *, now: datetime | None = None) -> bool:
+    """True when a disabled enrollment is older than ``TOTP_SETUP_TTL_SECONDS``."""
+    if method.enabled:
+        return False
+    reference = now if now is not None else _utcnow()
+    return _as_utc(method.created_at) + _setup_ttl() < _as_utc(reference)
 
 
 def _send_security_notification(*, to_address: str, subject: str, text_body: str) -> None:
@@ -147,6 +173,27 @@ def setup_totp(
     )
 
 
+def cancel_totp_setup(user: User) -> TotpCancelSetupResult:
+    """Remove incomplete (disabled) TOTP enrollment for the authenticated user.
+
+    Idempotent: succeeds when no disabled setup exists. Never deletes an
+    enabled authenticator. Does not rotate Sessions, write account events, or
+    send notification email.
+    """
+    method = user.totp_method
+    if method is None or method.enabled:
+        return TotpCancelSetupResult(ok=True)
+
+    try:
+        db.session.delete(method)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    return TotpCancelSetupResult(ok=True)
+
+
 def enable_totp(
     user: User,
     current_session: Session,
@@ -162,6 +209,15 @@ def enable_totp(
 
     method = user.totp_method
     if method is None or method.enabled:
+        return TotpEnableResult(ok=False, error=TOTP_SETUP_REQUIRED_MESSAGE)
+
+    if _is_disabled_setup_expired(method):
+        try:
+            db.session.delete(method)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
         return TotpEnableResult(ok=False, error=TOTP_SETUP_REQUIRED_MESSAGE)
 
     try:

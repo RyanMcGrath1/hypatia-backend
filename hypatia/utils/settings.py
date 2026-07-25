@@ -83,6 +83,7 @@ class Config:
     ENV_AUTH_SESSION_TTL_DAYS = "AUTH_SESSION_TTL_DAYS"
     ENV_TOTP_ENCRYPTION_KEY = "TOTP_ENCRYPTION_KEY"
     ENV_TOTP_ISSUER_NAME = "TOTP_ISSUER_NAME"
+    ENV_TOTP_SETUP_TTL_SECONDS = "TOTP_SETUP_TTL_SECONDS"
     ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES = "TOTP_LOGIN_CHALLENGE_TTL_MINUTES"
     ENV_TOTP_LOGIN_MAX_ATTEMPTS = "TOTP_LOGIN_MAX_ATTEMPTS"
     ENV_AUTH_RATE_LIMIT_STORAGE_URI = "AUTH_RATE_LIMIT_STORAGE_URI"
@@ -111,6 +112,8 @@ class Config:
     # Do not generate a new key on each startup; enrolled secrets would become undecryptable.
     TOTP_ENCRYPTION_KEY = os.environ.get(ENV_TOTP_ENCRYPTION_KEY, "")
     TOTP_ISSUER_NAME = os.environ.get(ENV_TOTP_ISSUER_NAME, "Hypatia")
+    # Incomplete (disabled) enrollment must be confirmed within this window.
+    TOTP_SETUP_TTL_SECONDS = env_int(ENV_TOTP_SETUP_TTL_SECONDS, default=900)
     TOTP_LOGIN_CHALLENGE_TTL_MINUTES = env_int(
         ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES, default=5
     )
@@ -206,6 +209,9 @@ class TestingConfig(Config):
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     )
     TOTP_ISSUER_NAME = os.environ.get(Config.ENV_TOTP_ISSUER_NAME, "Hypatia")
+    TOTP_SETUP_TTL_SECONDS = env_int(
+        Config.ENV_TOTP_SETUP_TTL_SECONDS, default=900
+    )
     TOTP_LOGIN_CHALLENGE_TTL_MINUTES = env_int(
         Config.ENV_TOTP_LOGIN_CHALLENGE_TTL_MINUTES, default=5
     )

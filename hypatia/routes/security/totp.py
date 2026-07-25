@@ -6,7 +6,12 @@ from flask import g, jsonify, request
 
 from hypatia.routes.security import bp
 from hypatia.services.audit import get_audit_request_context
-from hypatia.services.security import disable_totp, enable_totp, setup_totp
+from hypatia.services.security import (
+    cancel_totp_setup,
+    disable_totp,
+    enable_totp,
+    setup_totp,
+)
 from hypatia.utils.auth import auth_required
 
 
@@ -43,6 +48,14 @@ def totp_setup():
             "manual_entry_key": result.manual_entry_key,
         }
     ), 200
+
+
+@bp.delete("/api/security/totp/setup")
+@auth_required
+def totp_cancel_setup():
+    """Cancel incomplete TOTP enrollment for the current user (idempotent)."""
+    result = cancel_totp_setup(g.current_user)
+    return jsonify({"message": result.message}), 200
 
 
 @bp.post("/api/security/totp/enable")

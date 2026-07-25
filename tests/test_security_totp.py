@@ -36,9 +36,10 @@ from hypatia.services.security.totp import (
     CURRENT_PASSWORD_INCORRECT_MESSAGE,
     TOTP_ALREADY_ENABLED_MESSAGE,
     TOTP_INVALID_CODE_MESSAGE,
+    TOTP_SETUP_CANCELLED_MESSAGE,
+    TOTP_SETUP_REQUIRED_MESSAGE,
     disable_totp,
     enable_totp,
-    setup_totp,
 )
 from hypatia.services.security.totp_crypto import (
     TOTP_ENCRYPTION_INVALID_KEY_MESSAGE,
@@ -93,6 +94,13 @@ def _disable(client, token: str, *, current_password: str, code: str):
         "/api/security/totp/disable",
         data=json.dumps({"current_password": current_password, "code": code}),
         content_type="application/json",
+        headers=auth_headers(token),
+    )
+
+
+def _cancel_setup(client, token: str):
+    return client.delete(
+        "/api/security/totp/setup",
         headers=auth_headers(token),
     )
 
@@ -779,7 +787,7 @@ def test_disable_deletes_method_rotates_sessions_and_events(client, db_session) 
         return_value=float(next_time),
     ):
         code = pyotp.TOTP(secret).at(next_time)
-        with patch("hypatia.services.security.totp.send_email") as send_email:
+        with patch("hypatia.services.security.totp.send_email"):
             response = _disable(client, new_token, current_password=PASSWORD, code=code)
 
     assert response.status_code == 200
@@ -1267,3 +1275,191 @@ def test_password_only_login_creates_no_mfa_challenge_row(client, db_session) ->
     assert (
         db_session.scalar(select(func.count()).select_from(MfaLoginChallenge)) == before
     )
+
+
+# --- Incomplete setup cancel / expiry ---
+
+
+def test_cancel_setup_requires_authentication(client, db_session) -> None:
+    response = client.delete("/api/security/totp/setup")
+    assert response.status_code == 401
+    assert response.get_json()["error"] == UNAUTHENTICATED_MESSAGE
+
+
+def test_cancel_removes_disabled_setup(client, db_session) -> None:
+    user, token = _auth_client(client, db_session)
+    assert _setup(client, token).status_code == 200
+    assert db_session.get(TOTPMethod, user.id) is not None
+
+    response = _cancel_setup(client, token)
+    assert response.status_code == 200
+    assert response.get_json()["message"] == TOTP_SETUP_CANCELLED_MESSAGE
+    assert db_session.get(TOTPMethod, user.id) is None
+
+
+def test_cancel_setup_is_idempotent(client, db_session) -> None:
+    _user, token = _auth_client(client, db_session)
+    assert _setup(client, token).status_code == 200
+    assert _cancel_setup(client, token).status_code == 200
+
+    again = _cancel_setup(client, token)
+    assert again.status_code == 200
+    assert again.get_json()["message"] == TOTP_SETUP_CANCELLED_MESSAGE
+
+
+def test_cancel_setup_is_scoped_to_authenticated_user(client, db_session) -> None:
+    user_a, token_a = _auth_client(
+        client, db_session, email="alice-cancel@example.com"
+    )
+    user_b, token_b = _auth_client(
+        client, db_session, email="bob-cancel@example.com"
+    )
+    secret_b = _setup(client, token_b).get_json()["manual_entry_key"]
+    assert _setup(client, token_a).status_code == 200
+
+    assert _cancel_setup(client, token_a).status_code == 200
+    assert db_session.get(TOTPMethod, user_a.id) is None
+
+    method_b = db_session.get(TOTPMethod, user_b.id)
+    assert method_b is not None
+    assert method_b.enabled is False
+    assert decrypt_totp_secret(method_b.secret_encrypted) == secret_b
+
+
+def test_cancel_does_not_remove_enabled_totp(client, db_session) -> None:
+    user, token = _auth_client(client, db_session)
+    secret, enabled_token = _enroll_enabled(client, db_session, user, token)
+
+    response = _cancel_setup(client, enabled_token)
+    assert response.status_code == 200
+    assert response.get_json()["message"] == TOTP_SETUP_CANCELLED_MESSAGE
+
+    db_session.refresh(user)
+    method = db_session.get(TOTPMethod, user.id)
+    assert method is not None
+    assert method.enabled is True
+    assert decrypt_totp_secret(method.secret_encrypted) == secret
+
+
+def test_cancel_does_not_rotate_sessions(client, db_session) -> None:
+    user, token = _auth_client(client, db_session)
+    assert _setup(client, token).status_code == 200
+    token_hash = hash_session_token(token)
+    session_before = db_session.scalar(
+        select(Session).where(Session.token_hash == token_hash)
+    )
+    assert session_before is not None
+    session_id = session_before.id
+
+    response = _cancel_setup(client, token)
+    assert response.status_code == 200
+    assert "token" not in response.get_json()
+
+    assert validate_session(token).valid is True
+    session_after = db_session.scalar(
+        select(Session).where(Session.token_hash == token_hash)
+    )
+    assert session_after is not None
+    assert session_after.id == session_id
+    assert session_after.revoked_at is None
+    assert db_session.get(TOTPMethod, user.id) is None
+
+
+def test_cancel_creates_no_totp_disabled_event(client, db_session) -> None:
+    user, token = _auth_client(client, db_session)
+    assert _setup(client, token).status_code == 200
+
+    assert _cancel_setup(client, token).status_code == 200
+    disabled_events = db_session.scalars(
+        select(AccountEvent).where(
+            AccountEvent.user_id == user.id,
+            AccountEvent.event_type == EVENT_TOTP_DISABLED,
+        )
+    ).all()
+    assert disabled_events == []
+
+
+def test_cancel_sends_no_totp_disabled_email(client, db_session) -> None:
+    _user, token = _auth_client(client, db_session)
+    assert _setup(client, token).status_code == 200
+
+    with patch("hypatia.services.security.totp.send_email") as send_email:
+        assert _cancel_setup(client, token).status_code == 200
+        send_email.assert_not_called()
+
+
+def test_cancelled_secret_cannot_enable_then_fresh_setup_works(
+    client, db_session
+) -> None:
+    user, token = _auth_client(client, db_session)
+    secret_a = _setup(client, token).get_json()["manual_entry_key"]
+    assert _cancel_setup(client, token).status_code == 200
+    assert db_session.get(TOTPMethod, user.id) is None
+
+    enable_old = _enable(client, token, _current_code(secret_a))
+    assert enable_old.status_code == 400
+    assert enable_old.get_json()["error"] == TOTP_SETUP_REQUIRED_MESSAGE
+    assert db_session.get(TOTPMethod, user.id) is None
+
+    secret_b = _setup(client, token).get_json()["manual_entry_key"]
+    assert secret_a != secret_b
+    enabled = _enable(client, token, _current_code(secret_b))
+    assert enabled.status_code == 200
+    db_session.refresh(user)
+    assert user.totp_method is not None
+    assert user.totp_method.enabled is True
+
+
+def test_repeated_setup_old_secret_cannot_enable(client, db_session) -> None:
+    user, token = _auth_client(client, db_session)
+    secret_a = _setup(client, token).get_json()["manual_entry_key"]
+    secret_b = _setup(client, token).get_json()["manual_entry_key"]
+    assert secret_a != secret_b
+    assert db_session.scalar(select(func.count()).select_from(TOTPMethod)) == 1
+
+    rejected = _enable(client, token, _current_code(secret_a))
+    assert rejected.status_code == 400
+    assert rejected.get_json()["error"] == TOTP_INVALID_CODE_MESSAGE
+    db_session.refresh(user)
+    assert user.totp_method is not None
+    assert user.totp_method.enabled is False
+
+    accepted = _enable(client, token, _current_code(secret_b))
+    assert accepted.status_code == 200
+    db_session.refresh(user)
+    assert user.totp_method.enabled is True
+
+
+def test_fresh_disabled_setup_can_enable_within_ttl(client, db_session, app) -> None:
+    user, token = _auth_client(client, db_session)
+    secret = _setup(client, token).get_json()["manual_entry_key"]
+    ttl = int(app.config["TOTP_SETUP_TTL_SECONDS"])
+    method = db_session.get(TOTPMethod, user.id)
+    assert method is not None
+    method.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl - 30)
+    db_session.commit()
+
+    response = _enable(client, token, _current_code(secret))
+    assert response.status_code == 200
+    db_session.refresh(user)
+    assert user.totp_method is not None
+    assert user.totp_method.enabled is True
+
+
+def test_expired_disabled_setup_cannot_enable_and_is_removed(
+    client, db_session, app
+) -> None:
+    user, token = _auth_client(client, db_session)
+    secret = _setup(client, token).get_json()["manual_entry_key"]
+    ttl = int(app.config["TOTP_SETUP_TTL_SECONDS"])
+    method = db_session.get(TOTPMethod, user.id)
+    assert method is not None
+    method.created_at = datetime.now(timezone.utc) - timedelta(seconds=ttl + 1)
+    db_session.commit()
+
+    response = _enable(client, token, _current_code(secret))
+    assert response.status_code == 400
+    assert response.get_json()["error"] == TOTP_SETUP_REQUIRED_MESSAGE
+    assert db_session.get(TOTPMethod, user.id) is None
+    db_session.refresh(user)
+    assert user.totp_method is None
