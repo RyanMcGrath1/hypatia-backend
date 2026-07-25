@@ -39,6 +39,7 @@ from hypatia.services.auth.sessions import (
     validate_session,
 )
 from hypatia.services.auth.validation import MIN_PASSWORD_LENGTH, validate_password
+from hypatia.services.email import EmailDeliveryError
 from tests.auth_helpers import auth_headers, create_user_with_profile, login
 
 OLD_PASSWORD = "validpassword12"
@@ -544,20 +545,23 @@ def test_failure_during_replacement_session_rolls_back(client, db_session) -> No
         old_raw, new_raw = _email_change_tokens_from_send_mock(mock_send)
     assert _email_change_request_count(db_session, user.id) == 1
 
-    with patch(
-        "hypatia.services.account.password.create_session",
-        side_effect=RuntimeError("simulated failure"),
-    ):
-        try:
-            change_user_password(
-                user,
-                current_session,
-                current_password=OLD_PASSWORD,
-                new_password=NEW_PASSWORD,
-                confirm_new_password=NEW_PASSWORD,
-            )
-        except RuntimeError:
-            pass
+    with patch("hypatia.services.account.password.send_email") as notify_send:
+        with patch(
+            "hypatia.services.account.password.create_session",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            try:
+                change_user_password(
+                    user,
+                    current_session,
+                    current_password=OLD_PASSWORD,
+                    new_password=NEW_PASSWORD,
+                    confirm_new_password=NEW_PASSWORD,
+                )
+            except RuntimeError:
+                pass
+
+    notify_send.assert_not_called()
 
     db_session.expire_all()
     user = db_session.scalar(select(User).where(User.email == "user@example.com"))
@@ -942,6 +946,126 @@ def test_new_email_change_request_works_after_password_change(client, db_session
     assert second.get_json()["email_change_complete"] is True
     db_session.refresh(user)
     assert user.email == NEW_EMAIL
+
+
+# --- Email notification ---
+
+
+def test_successful_change_sends_password_changed_notification(client, db_session) -> None:
+    user, token = _auth_client_for(client, db_session)
+    account_email = user.email
+
+    def _assert_password_already_changed(*_args, **_kwargs):
+        db_session.refresh(user)
+        assert verify_password(user.password_hash, NEW_PASSWORD)
+        assert not verify_password(user.password_hash, OLD_PASSWORD)
+        return None
+
+    with patch(
+        "hypatia.services.account.password.send_email",
+        side_effect=_assert_password_already_changed,
+    ) as send_email:
+        response = _change_password(client, token)
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert set(payload.keys()) == {"message", "token", "password_changed_at"}
+    assert send_email.call_count == 1
+    kwargs = send_email.call_args.kwargs
+    assert kwargs["to_address"] == account_email
+    assert kwargs["subject"] == "Your Hypatia password was changed"
+    body = kwargs["text_body"]
+    assert "password was changed" in body.lower()
+    assert "no further action" in body.lower()
+    assert "compromised" in body.lower()
+    assert OLD_PASSWORD not in body
+    assert NEW_PASSWORD not in body
+    assert payload["token"] not in body
+    assert user.password_hash not in body
+
+
+def test_notification_failure_does_not_undo_password_change(client, db_session) -> None:
+    user, current_token = _auth_client_for(
+        client,
+        db_session,
+        password_changed_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    db_session.refresh(user)
+    original_changed_at = user.password_changed_at
+    other_token, _ = create_session(user)
+    db_session.commit()
+
+    with patch(
+        "hypatia.services.account.password.send_email",
+        side_effect=EmailDeliveryError("smtp down"),
+    ):
+        response = _change_password(client, current_token)
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert set(payload.keys()) == {"message", "token", "password_changed_at"}
+    assert payload["message"] == "Password changed successfully"
+    new_token = payload["token"]
+    assert new_token
+    assert new_token != current_token
+
+    db_session.refresh(user)
+    assert verify_password(user.password_hash, NEW_PASSWORD)
+    assert not verify_password(user.password_hash, OLD_PASSWORD)
+    assert user.password_changed_at != original_changed_at
+    assert payload["password_changed_at"] == _iso8601(user.password_changed_at)
+
+    assert validate_session(current_token).valid is False
+    assert validate_session(other_token).valid is False
+    assert validate_session(new_token).valid is True
+    active = db_session.scalars(
+        select(Session).where(
+            Session.user_id == user.id,
+            Session.revoked_at.is_(None),
+        )
+    ).all()
+    assert len(active) == 1
+
+    events = db_session.scalars(
+        select(AccountEvent).where(AccountEvent.event_type == EVENT_PASSWORD_CHANGED)
+    ).all()
+    assert len(events) == 1
+    assert events[0].user_id == user.id
+
+    login_ok = login(client, email="user@example.com", password=NEW_PASSWORD)
+    assert login_ok
+    login_fail = client.post(
+        "/api/auth/login",
+        data=json.dumps({"email": "user@example.com", "password": OLD_PASSWORD}),
+        content_type="application/json",
+    )
+    assert login_fail.status_code == 401
+
+
+def test_rejected_change_does_not_send_password_changed_notification(
+    client, db_session
+) -> None:
+    _user, token = _auth_client_for(client, db_session)
+
+    with patch("hypatia.services.account.password.send_email") as send_email:
+        wrong = _change_password(client, token, current_password="wrongpassword12")
+        mismatch = _change_password(
+            client,
+            token,
+            new_password=NEW_PASSWORD,
+            confirm_new_password="differentpassword1",
+        )
+        invalid = _change_password(
+            client,
+            token,
+            new_password="a" * 14,
+            confirm_new_password="a" * 14,
+        )
+
+    assert wrong.status_code == 400
+    assert mismatch.status_code == 400
+    assert invalid.status_code == 400
+    send_email.assert_not_called()
 
 
 # --- Profile compatibility ---

@@ -1,12 +1,13 @@
 """Change-password flow for the authenticated current user.
 
-Security notification email ("your password was changed") is intentionally not
-sent here: email-delivery infrastructure is not built yet. When email is
-introduced, emit a notification after a successful PASSWORD_CHANGED commit.
+After a successful PASSWORD_CHANGED commit, a best-effort security
+notification is emailed to the account's current address. Delivery failure
+does not undo the password change or session rotation.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -18,9 +19,21 @@ from hypatia.services.auth.mfa_challenge import delete_mfa_login_challenges_for_
 from hypatia.services.auth.passwords import hash_password, verify_password
 from hypatia.services.auth.sessions import create_session, revoke_all_sessions_for_user
 from hypatia.services.auth.validation import validate_password
+from hypatia.services.email import EmailDeliveryError, EmailNotConfiguredError, send_email
+
+logger = logging.getLogger(__name__)
 
 CURRENT_PASSWORD_INCORRECT_MESSAGE = "Current password is incorrect"
 NEW_PASSWORDS_DO_NOT_MATCH_MESSAGE = "New passwords do not match"
+
+_PASSWORD_CHANGED_NOTIFY_SUBJECT = "Your Hypatia password was changed"
+_PASSWORD_CHANGED_NOTIFY_BODY = (
+    "Your Hypatia password was changed.\n"
+    "\n"
+    "If you made this change, no further action is needed.\n"
+    "\n"
+    "If you did not make this change, your account may have been compromised.\n"
+)
 
 
 def _utcnow() -> datetime:
@@ -46,6 +59,20 @@ class ChangePasswordResult:
     password_changed_at: str | None = None
 
 
+def _send_password_changed_notification(*, to_address: str) -> None:
+    try:
+        send_email(
+            to_address=to_address,
+            subject=_PASSWORD_CHANGED_NOTIFY_SUBJECT,
+            text_body=_PASSWORD_CHANGED_NOTIFY_BODY,
+        )
+    except (EmailDeliveryError, EmailNotConfiguredError) as exc:
+        logger.error(
+            "Password change notification failed error_type=%s",
+            type(exc).__name__,
+        )
+
+
 def change_user_password(
     user: User,
     current_session: Session,
@@ -64,7 +91,8 @@ def change_user_password(
     set ``password_changed_at``, invalidate outstanding MFA login challenges
     and pending email-change requests, revoke all sessions (including
     ``current_session``), create one replacement session, and record
-    ``PASSWORD_CHANGED`` — all in one database transaction.
+    ``PASSWORD_CHANGED`` — all in one database transaction. A security
+    notification email is attempted only after that commit succeeds.
     """
     if current_session.user_id != user.id:
         raise ValueError("current_session does not belong to user")
@@ -105,6 +133,7 @@ def change_user_password(
         db.session.rollback()
         raise
 
+    _send_password_changed_notification(to_address=user.email)
     return ChangePasswordResult(
         ok=True,
         raw_token=raw_token,
