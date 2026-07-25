@@ -16,7 +16,12 @@ from hypatia.services.auth.constants import (
     EVENT_LOGIN_SUCCESS,
 )
 from hypatia.services.auth.emails import normalize_email
-from hypatia.services.auth.passwords import hash_password, password_needs_rehash, verify_password
+from hypatia.services.auth.passwords import (
+    hash_password,
+    password_needs_rehash,
+    perform_dummy_password_verification,
+    verify_password,
+)
 from hypatia.services.security.totp import user_has_totp_enabled
 
 
@@ -51,7 +56,8 @@ def authenticate_user(
     login: ``LOGIN_SUCCESS`` and ``last_login_at`` are deferred until MFA
     succeeds. Argon2 maintenance rehash may still occur on password success.
 
-    Unknown-email failures are logged via ``hypatia.security`` (no ``AccountEvent``)
+    Unknown-email failures still perform one dummy Argon2 verification (timing
+    mitigation) then are logged via ``hypatia.security`` (no ``AccountEvent``)
     so attempted emails are never stored in audit rows.
 
     Decision: do not gate login on ``email_verified`` until email verification exists.
@@ -59,6 +65,8 @@ def authenticate_user(
     """
     user = _find_user_by_email(email)
     if user is None:
+        # Comparable Argon2 work to known-email + wrong password; result discarded.
+        perform_dummy_password_verification(password)
         log_security_event(
             EVENT_LOGIN_FAILED,
             ip_address=ip_address,

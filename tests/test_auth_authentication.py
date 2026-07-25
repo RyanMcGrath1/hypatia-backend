@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from sqlalchemy import func, select
 
-from hypatia.models import AccountEvent
+from hypatia.models import AccountEvent, MfaLoginChallenge, Session, User
 from hypatia.services.auth.authentication import authenticate_user
 from hypatia.services.auth.constants import (
     EVENT_LOGIN_FAILED,
     EVENT_LOGIN_SUCCESS,
     INVALID_CREDENTIALS_MESSAGE,
+)
+from hypatia.services.auth.passwords import (
+    _DUMMY_PASSWORD_PLAINTEXT,
+    perform_dummy_password_verification,
+    verify_password,
 )
 from tests.auth_helpers import create_user
 
@@ -156,4 +163,101 @@ def test_successful_login_rehash_does_not_update_password_changed_at(
 
 
 def test_invalid_credentials_constant_is_generic() -> None:
-    assert "email" not in INVALID_CREDENTIALS_MESSAGE.lower() or "or password" in INVALID_CREDENTIALS_MESSAGE.lower()
+    message = INVALID_CREDENTIALS_MESSAGE.lower()
+    assert "email" not in message or "or password" in message
+
+
+# --- Login timing mitigation (Security Finding #7) ---
+
+
+def test_unknown_email_performs_dummy_password_verification_once(
+    db_session, monkeypatch
+) -> None:
+    calls: list[str] = []
+
+    def _spy(password: str) -> None:
+        calls.append(password)
+        perform_dummy_password_verification(password)
+
+    monkeypatch.setattr(
+        "hypatia.services.auth.authentication.perform_dummy_password_verification",
+        _spy,
+    )
+
+    with patch(
+        "hypatia.services.auth.authentication.verify_password",
+        wraps=verify_password,
+    ) as real_verify:
+        result = authenticate_user("missing@example.com", "any-password-12")
+
+    assert result.success is False
+    assert result.user is None
+    assert calls == ["any-password-12"]
+    assert real_verify.call_count == 0
+
+
+def test_known_wrong_password_verifies_real_hash_once(db_session, monkeypatch) -> None:
+    create_user(db_session, email="user@example.com", password="validpassword12")
+    dummy_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "hypatia.services.auth.authentication.perform_dummy_password_verification",
+        lambda password: dummy_calls.append(password),
+    )
+
+    with patch(
+        "hypatia.services.auth.authentication.verify_password",
+        wraps=verify_password,
+    ) as real_verify:
+        result = authenticate_user("user@example.com", "wrongpassword12")
+
+    assert result.success is False
+    assert result.user is None
+    assert real_verify.call_count == 1
+    assert dummy_calls == []
+
+
+def test_dummy_password_plaintext_cannot_authenticate_unknown_email(db_session) -> None:
+    result = authenticate_user("missing@example.com", _DUMMY_PASSWORD_PLAINTEXT)
+
+    assert result.success is False
+    assert result.user is None
+    assert result.mfa_required is False
+    assert db_session.scalar(select(func.count()).select_from(Session)) == 0
+    assert db_session.scalar(select(func.count()).select_from(MfaLoginChallenge)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AccountEvent)) == 0
+
+
+def test_unknown_email_login_has_no_auth_side_effects(db_session) -> None:
+    users_before = db_session.scalar(select(func.count()).select_from(User)) or 0
+
+    result = authenticate_user("nobody@example.com", "validpassword12")
+
+    assert result.success is False
+    assert result.user is None
+    assert result.mfa_required is False
+    assert db_session.scalar(select(func.count()).select_from(User)) == users_before
+    assert db_session.scalar(select(func.count()).select_from(Session)) == 0
+    assert db_session.scalar(select(func.count()).select_from(MfaLoginChallenge)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AccountEvent)) == 0
+
+
+def test_successful_login_does_not_run_dummy_verification(db_session, monkeypatch) -> None:
+    create_user(db_session, email="user@example.com", password="validpassword12")
+    dummy_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "hypatia.services.auth.authentication.perform_dummy_password_verification",
+        lambda password: dummy_calls.append(password),
+    )
+
+    with patch(
+        "hypatia.services.auth.authentication.verify_password",
+        wraps=verify_password,
+    ) as real_verify:
+        result = authenticate_user("user@example.com", "validpassword12")
+
+    assert result.success is True
+    assert result.user is not None
+    assert real_verify.call_count == 1
+    assert dummy_calls == []
