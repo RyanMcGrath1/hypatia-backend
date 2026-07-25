@@ -6,6 +6,16 @@ import pytest
 
 DEV_ORIGIN = "http://localhost:8081"
 
+# Complete non-credential header set from Hypatia hooks/api/httpClient.ts.
+# Registration POST (JSON body, no Bearer):
+REGISTER_REQUEST_HEADERS = (
+    "accept,cache-control,content-type,pragma,x-request-id"
+)
+# Authenticated JSON mutating requests also send Authorization.
+AUTHENTICATED_REQUEST_HEADERS = (
+    "accept,authorization,cache-control,content-type,pragma,x-request-id"
+)
+
 
 def _allow_headers(response) -> set[str]:
     raw = response.headers.get("Access-Control-Allow-Headers", "")
@@ -23,20 +33,40 @@ def _allow_methods(response) -> set[str]:
         (
             "/api/auth/register",
             "POST",
-            "content-type,x-request-id",
-            {"content-type", "x-request-id"},
+            REGISTER_REQUEST_HEADERS,
+            {
+                "accept",
+                "cache-control",
+                "content-type",
+                "pragma",
+                "x-request-id",
+            },
         ),
         (
             "/api/profile",
             "PATCH",
-            "authorization,content-type,x-request-id",
-            {"authorization", "content-type", "x-request-id"},
+            AUTHENTICATED_REQUEST_HEADERS,
+            {
+                "accept",
+                "authorization",
+                "cache-control",
+                "content-type",
+                "pragma",
+                "x-request-id",
+            },
         ),
         (
             "/api/security/totp/setup",
             "DELETE",
-            "authorization,content-type,x-request-id",
-            {"authorization", "content-type", "x-request-id"},
+            AUTHENTICATED_REQUEST_HEADERS,
+            {
+                "accept",
+                "authorization",
+                "cache-control",
+                "content-type",
+                "pragma",
+                "x-request-id",
+            },
         ),
     ],
 )
