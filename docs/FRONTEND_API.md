@@ -468,14 +468,14 @@ GET /api/economy/inflation/cpi-components
 
 ---
 
-## `GET /api/economy/fred/series/PAYEMS/delta`
+## `GET /api/economy/labor/payems/delta`
 
 **Purpose:** PAYEMS month-over-month change (`units=chg`).
 
 Optional: `observation_start`, `observation_end`, `limit`, `sort_order`.
 
 ```http
-GET /api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc
+GET /api/economy/labor/payems/delta?limit=72&sort_order=desc
 ```
 
 ---
@@ -588,6 +588,7 @@ export type LaborSectorResponse = {
 ```text
 "/api/economy/overview"     →  "/api/economy/dashboard"
 "/api/economy/sector"       →  "/api/economy/labor/sector"
+"/api/economy/fred/series/PAYEMS/delta" → "/api/economy/labor/payems/delta"
 ```
 
 ---
@@ -609,6 +610,6 @@ export type LaborSectorResponse = {
 | GET | `/api/economy/rates/key-metrics` |
 | GET | `/api/economy/inflation/pce-vs-target` |
 | GET | `/api/economy/inflation/cpi-components` |
-| GET | `/api/economy/fred/series/PAYEMS/delta` |
+| GET | `/api/economy/labor/payems/delta` |
 | GET | `/api/fec/candidates` |
 | GET | `/api/news/top-headlines` |

@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `FRED_API_KEY` (economy rout
 
 **API keys**
 
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/dashboard`, `GET /api/economy/labor/sector`, `GET /api/economy/fred/series/PAYEMS/delta`, and related labor/rates/inflation/GDP widgets)
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/dashboard`, `GET /api/economy/labor/sector`, `GET /api/economy/labor/payems/delta`, and related labor/rates/inflation/GDP widgets)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/candidates`
 
@@ -132,7 +132,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | GET | `/api/economy/rates/fed-funds-target` | FOMC fed funds target range via FRED ``DFEDTARL`` and ``DFEDTARU``; JSON has `as_of`, `target_lower`, `target_upper`, `observation_date`, and `series` (see [Fed funds target range](#fed-funds-target-range-apieconomyratesfed-funds-target)) |
 | GET | `/api/economy/rates/key-metrics` | Latest ``DGS10``, ``MORTGAGE30US``, and ``DGS2`` for the rates detail KEY METRICS widget; JSON has `as_of` and `metrics` (see [Rates key metrics](#rates-key-metrics-apieconomyrateskey-metrics)) |
 | GET | `/api/economy/labor/age-metrics` | Unemployment, labor force participation, and employment-population ratio by age cohort (12 FRED `LNS*` series); see [Labor age metrics](#labor-age-metrics-apieconomylaborage-metrics) |
-| GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
+| GET | `/api/economy/labor/payems/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
 | GET | `/api/fec/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
 
@@ -176,14 +176,14 @@ Example:
 curl -sS "http://127.0.0.1:5001/api/economy/dashboard"
 ```
 
-### PAYEMS monthly deltas (`/api/economy/fred/series/PAYEMS/delta`)
+### PAYEMS monthly deltas (`/api/economy/labor/payems/delta`)
 
 Returns PAYEMS month-over-month deltas directly from FRED (`units=chg`) so clients do not need to subtract levels manually. The server still injects `api_key` and `file_type=json`. Optional query params include `observation_start`, `limit`, and `sort_order`.
 
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
+curl -sS "http://127.0.0.1:5001/api/economy/labor/payems/delta?limit=72&sort_order=desc"
 ```
 
 ### Labor employment by sector (`/api/economy/labor/sector`)

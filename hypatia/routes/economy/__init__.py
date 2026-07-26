@@ -8,14 +8,16 @@ bp = Blueprint("economy", __name__)
 
 from hypatia.routes.economy import (  # noqa: E402, F401
     cpi,
-    dashboard,
     detail,
-    fred,
+    economy_controller,
     inflation_cpi_components,
     inflation_pce_vs_target,
     labor_age_metrics,
-    labor_earnings_inflation,
-    labor_sector,
+    labor_market_controller,
     rates_fed_funds_target,
     rates_key_metrics,
 )
+
+# Controllers with their own ``url_prefix``; nest under this package blueprint.
+bp.register_blueprint(economy_controller.bp)
+bp.register_blueprint(labor_market_controller.bp)

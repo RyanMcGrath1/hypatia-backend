@@ -592,7 +592,7 @@ def test_economy_labor_sector_returns_503_when_all_network_failed(client):
     with (
         patch.dict(os.environ, {"FRED_API_KEY": "k"}),
         patch(
-            "hypatia.routes.economy.labor_sector.build_employment_sectors",
+            "hypatia.routes.economy.labor_market_controller.build_employment_sectors",
             return_value=(empty_payload, True),
         ),
     ):
@@ -609,7 +609,7 @@ def test_payems_delta_series_forwards_units_and_sort_order(client):
         status=200,
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "myfredkey"}):
-        resp = client.get("/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc")
+        resp = client.get("/api/economy/labor/payems/delta?limit=72&sort_order=desc")
     assert resp.status_code == 200
     qs = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert qs["api_key"] == ["myfredkey"]

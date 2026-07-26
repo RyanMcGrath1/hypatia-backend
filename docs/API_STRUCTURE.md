@@ -6,7 +6,7 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 
 | Expo `hooks/api/` module | Backend package | Paths |
 |--------------------------|-----------------|-------|
-| `economyDashboardApi.ts` | `hypatia/routes/economy/dashboard.py` | `/api/economy/dashboard` |
+| `economyDashboardApi.ts` | `hypatia/routes/economy/economy_controller.py` | `/api/economy/dashboard` |
 | `economyGdpGrowthRateApi.ts` | `hypatia/routes/economy/detail.py` | `/api/economy/gdp/growth-rate`, `/api/economy/gdp/growth-headwinds` |
 | `economyGdpSectorContributionApi.ts` | `hypatia/routes/economy/detail.py` | `/api/economy/gdp/sector-contribution` |
 | `economyCpiApi.ts` | `hypatia/routes/economy/cpi.py` | `/api/economy/cpi` |
@@ -14,10 +14,10 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 | `economyInflationCpiComponentsApi.ts` | `hypatia/routes/economy/inflation_cpi_components.py` | `/api/economy/inflation/cpi-components` |
 | `economyRatesFedFundsTargetApi.ts` | `hypatia/routes/economy/rates_fed_funds_target.py` | `/api/economy/rates/fed-funds-target` |
 | `economyRatesKeyMetricsApi.ts` | `hypatia/routes/economy/rates_key_metrics.py` | `/api/economy/rates/key-metrics` |
-| `economySectorApi.ts` | `hypatia/routes/economy/labor_sector.py` | `/api/economy/labor/sector` |
-| `economyLaborEarningsInflationApi.ts` | `hypatia/routes/economy/labor_earnings_inflation.py` | `/api/economy/labor/earnings-inflation` |
+| `economySectorApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/sector` |
+| `economyLaborEarningsInflationApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/earnings-inflation` |
 | `economyLaborAgeMetricsApi.ts` | `hypatia/routes/economy/labor_age_metrics.py` | `/api/economy/labor/age-metrics` |
-| `fredObservations.ts` | `hypatia/routes/economy/fred.py` | `/api/economy/fred/series/PAYEMS/delta` |
+| `fredObservations.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/payems/delta` |
 | `newsApi.ts` | `hypatia/routes/news/` | `/api/news/top-headlines` |
 | `fecCandidatesApi.ts` | `hypatia/routes/fec/` | `/api/fec/candidates` |
 | (load balancers) | `hypatia/routes/health.py` | `/health` |
