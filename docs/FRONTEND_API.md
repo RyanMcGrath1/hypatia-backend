@@ -589,6 +589,7 @@ export type LaborSectorResponse = {
 "/api/economy/overview"     →  "/api/economy/dashboard"
 "/api/economy/sector"       →  "/api/economy/labor/sector"
 "/api/economy/fred/series/PAYEMS/delta" → "/api/economy/labor/payems/delta"
+"/api/economy/cpi"          →  "/api/economy/inflation/cpi"
 ```
 
 ---
@@ -599,7 +600,7 @@ export type LaborSectorResponse = {
 |--------|------|
 | GET | `/health` |
 | GET | `/api/economy/dashboard` |
-| GET | `/api/economy/cpi` |
+| GET | `/api/economy/inflation/cpi` |
 | GET | `/api/economy/gdp/growth-rate` |
 | GET | `/api/economy/gdp/sector-contribution` |
 | GET | `/api/economy/gdp/growth-headwinds` |

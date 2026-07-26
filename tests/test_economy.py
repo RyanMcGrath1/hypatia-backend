@@ -621,7 +621,7 @@ def test_payems_delta_series_forwards_units_and_sort_order(client):
 
 def test_economy_cpi_missing_fred_key(client):
     with patch.dict(os.environ, {"FRED_API_KEY": ""}):
-        resp = client.get("/api/economy/cpi")
+        resp = client.get("/api/economy/inflation/cpi")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "Missing FRED_API_KEY"
 
@@ -652,7 +652,7 @@ def test_economy_cpi_returns_last_five_months(client):
         content_type="application/json",
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/cpi")
+        resp = client.get("/api/economy/inflation/cpi")
     assert resp.status_code == 200
     data = resp.get_json()
     assert captured["series_id"] == ["CPIAUCSL"]
@@ -674,7 +674,7 @@ def test_economy_cpi_fred_http_error(client):
         status=429,
     )
     with patch.dict(os.environ, {"FRED_API_KEY": "test_key"}):
-        resp = client.get("/api/economy/cpi")
+        resp = client.get("/api/economy/inflation/cpi")
     assert resp.status_code == 429
     assert "Too Many Requests" in resp.get_json()["error"]
 

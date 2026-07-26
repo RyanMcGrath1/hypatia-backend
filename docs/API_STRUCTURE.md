@@ -9,11 +9,11 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 | `economyDashboardApi.ts` | `hypatia/routes/economy/economy_controller.py` | `/api/economy/dashboard` |
 | `economyGdpGrowthRateApi.ts` | `hypatia/routes/economy/detail.py` | `/api/economy/gdp/growth-rate`, `/api/economy/gdp/growth-headwinds` |
 | `economyGdpSectorContributionApi.ts` | `hypatia/routes/economy/detail.py` | `/api/economy/gdp/sector-contribution` |
-| `economyCpiApi.ts` | `hypatia/routes/economy/cpi.py` | `/api/economy/cpi` |
-| `economyInflationPceVsTargetApi.ts` | `hypatia/routes/economy/inflation_pce_vs_target.py` | `/api/economy/inflation/pce-vs-target` |
+| `economyCpiApi.ts` | `hypatia/routes/economy/inflation_controller.py` | `/api/economy/inflation/cpi` |
+| `economyInflationPceVsTargetApi.ts` | `hypatia/routes/economy/inflation_controller.py` | `/api/economy/inflation/pce-vs-target` |
 | `economyInflationCpiComponentsApi.ts` | `hypatia/routes/economy/inflation_controller.py` | `/api/economy/inflation/cpi-components` |
-| `economyRatesFedFundsTargetApi.ts` | `hypatia/routes/economy/rates_fed_funds_target.py` | `/api/economy/rates/fed-funds-target` |
-| `economyRatesKeyMetricsApi.ts` | `hypatia/routes/economy/rates_key_metrics.py` | `/api/economy/rates/key-metrics` |
+| `economyRatesFedFundsTargetApi.ts` | `hypatia/routes/economy/interest_rates_controller.py` | `/api/economy/rates/fed-funds-target` |
+| `economyRatesKeyMetricsApi.ts` | `hypatia/routes/economy/interest_rates_controller.py` | `/api/economy/rates/key-metrics` |
 | `economySectorApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/sector` |
 | `economyLaborEarningsInflationApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/earnings-inflation` |
 | `economyLaborAgeMetricsApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/age-metrics` |

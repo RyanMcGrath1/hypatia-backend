@@ -120,7 +120,7 @@ gunicorn -w 2 -b 0.0.0.0:5001 wsgi:application
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | JSON liveness check (load balancers) |
-| GET | `/api/economy/cpi` | Last 5 months of FRED ``CPIAUCSL`` (Consumer Price Index), newest first; JSON has `as_of`, `series_id`, `label`, `unit`, `observations` |
+| GET | `/api/economy/inflation/cpi` | Last 5 months of FRED ``CPIAUCSL`` (Consumer Price Index), newest first; JSON has `as_of`, `series_id`, `label`, `unit`, `observations` |
 | GET | `/api/economy/inflation/pce-vs-target` | Headline ``PCEPI`` and core ``PCEPILFE`` YoY (``units=pc1``) vs Fed 2% target; JSON has `as_of`, `target`, `headline`, `core` |
 | GET | `/api/economy/inflation/cpi-components` | Headline ``CPIAUCSL`` and CPI component YoY (shelter, food, energy, core goods, core services); JSON has `as_of`, `observation_date`, `headline`, `components` |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
@@ -140,7 +140,7 @@ Economy routes that need FRED return **503** with `Missing FRED_API_KEY` when `F
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
-### Recent CPI (`/api/economy/cpi`)
+### Recent CPI (`/api/economy/inflation/cpi`)
 
 Returns the **5 most recent** monthly observations for FRED series **`CPIAUCSL`** (Consumer Price Index for All Urban Consumers: All Items), newest first.
 
@@ -156,7 +156,7 @@ Missing `FRED_API_KEY` → **503**. Upstream FRED errors are forwarded (e.g. **4
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/cpi"
+curl -sS "http://127.0.0.1:5001/api/economy/inflation/cpi"
 ```
 
 ### Economy dashboard (`/api/economy/dashboard`)

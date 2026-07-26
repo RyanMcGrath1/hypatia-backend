@@ -935,7 +935,7 @@ def build_employment_sectors(
 
 
 # ---------------------------------------------------------------------------
-# Recent CPI (GET /api/economy/cpi)
+# Recent CPI (GET /api/economy/inflation/cpi)
 # ---------------------------------------------------------------------------
 
 CPI_SERIES_ID = "CPIAUCSL"
