@@ -16,7 +16,7 @@ HTTP handlers are grouped under `hypatia/routes/` to match where the mobile app 
 | `economyRatesKeyMetricsApi.ts` | `hypatia/routes/economy/rates_key_metrics.py` | `/api/economy/rates/key-metrics` |
 | `economySectorApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/sector` |
 | `economyLaborEarningsInflationApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/earnings-inflation` |
-| `economyLaborAgeMetricsApi.ts` | `hypatia/routes/economy/labor_age_metrics.py` | `/api/economy/labor/age-metrics` |
+| `economyLaborAgeMetricsApi.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/age-metrics` |
 | `fredObservations.ts` | `hypatia/routes/economy/labor_market_controller.py` | `/api/economy/labor/payems/delta` |
 | `newsApi.ts` | `hypatia/routes/news/` | `/api/news/top-headlines` |
 | `fecCandidatesApi.ts` | `hypatia/routes/fec/` | `/api/fec/candidates` |

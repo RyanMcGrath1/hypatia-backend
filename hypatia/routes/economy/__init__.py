@@ -12,7 +12,6 @@ from hypatia.routes.economy import (  # noqa: E402, F401
     economy_controller,
     inflation_cpi_components,
     inflation_pce_vs_target,
-    labor_age_metrics,
     labor_market_controller,
     rates_fed_funds_target,
     rates_key_metrics,

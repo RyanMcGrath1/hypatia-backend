@@ -4,28 +4,29 @@ from __future__ import annotations
 
 from typing import Any
 
+from hypatia.models import LaborAgeGroup, LaborAgeMetricId
 from hypatia.services.economy.core import _build_fred_series_bundle
 
-_AGE_GROUPS: tuple[str, ...] = ("16-19", "20-24", "25-54", "55+")
+_AGE_GROUPS: tuple[str, ...] = tuple(g.value for g in LaborAgeGroup)
 
 # metric_id → (display name, age_group → FRED series_id)
 _LABOR_AGE_METRIC_DEFINITIONS: dict[str, tuple[str, dict[str, str]]] = {
-    "unemployment_rate": (
+    LaborAgeMetricId.UNEMPLOYMENT_RATE.value: (
         "Unemployment Rate",
         {
-            "16-19": "LNS14000012",
-            "20-24": "LNS14000036",
-            "25-54": "LNS14000060",
-            "55+": "LNS14024230",
+            LaborAgeGroup.AGE_16_19.value: "LNS14000012",
+            LaborAgeGroup.AGE_20_24.value: "LNS14000036",
+            LaborAgeGroup.AGE_25_54.value: "LNS14000060",
+            LaborAgeGroup.AGE_55_PLUS.value: "LNS14024230",
         },
     ),
-    "labor_force_participation": (
+    LaborAgeMetricId.LABOR_FORCE_PARTICIPATION.value: (
         "Labor Force Participation Rate",
         {
-            "16-19": "LNS11300012",
-            "20-24": "LNS11300036",
-            "25-54": "LNS11300060",
-            "55+": "LNS11324230",
+            LaborAgeGroup.AGE_16_19.value: "LNS11300012",
+            LaborAgeGroup.AGE_20_24.value: "LNS11300036",
+            LaborAgeGroup.AGE_25_54.value: "LNS11300060",
+            LaborAgeGroup.AGE_55_PLUS.value: "LNS11324230",
         },
     ),
 }
@@ -33,24 +34,23 @@ _LABOR_AGE_METRIC_DEFINITIONS: dict[str, tuple[str, dict[str, str]]] = {
 # BLS ratio series id, or (ratio id, employment level id, population level id) when FRED
 # does not publish the ratio (LNS12300036, LNS12324230) but does publish the levels.
 _EMP_POP_BY_AGE: dict[str, str | tuple[str, str, str]] = {
-    "16-19": "LNS12300012",
-    "20-24": ("LNS12300036", "LNS12000036", "LNU00000036"),
-    "25-54": "LNS12300060",
-    "55+": ("LNS12324230", "LNS12024230", "LNU00024230"),
+    LaborAgeGroup.AGE_16_19.value: "LNS12300012",
+    LaborAgeGroup.AGE_20_24.value: ("LNS12300036", "LNS12000036", "LNU00000036"),
+    LaborAgeGroup.AGE_25_54.value: "LNS12300060",
+    LaborAgeGroup.AGE_55_PLUS.value: ("LNS12324230", "LNS12024230", "LNU00024230"),
 }
 
 # Stable metric order in API responses.
-LABOR_AGE_METRIC_IDS: tuple[str, ...] = (
-    "unemployment_rate",
-    "labor_force_participation",
-    "employment_population_ratio",
-)
+LABOR_AGE_METRIC_IDS: tuple[str, ...] = tuple(m.value for m in LaborAgeMetricId)
 
 
 def _flat_series_defs() -> tuple[tuple[str, str], ...]:
     """``(fred_series_id, internal label)`` for parallel FRED fetch."""
     out: list[tuple[str, str]] = []
-    for metric_id in ("unemployment_rate", "labor_force_participation"):
+    for metric_id in (
+        LaborAgeMetricId.UNEMPLOYMENT_RATE.value,
+        LaborAgeMetricId.LABOR_FORCE_PARTICIPATION.value,
+    ):
         metric_name, by_age = _LABOR_AGE_METRIC_DEFINITIONS[metric_id]
         for age_group in _AGE_GROUPS:
             sid = by_age[age_group]
@@ -157,7 +157,10 @@ def build_labor_age_metrics(
     by_fred_id = {entry["id"]: entry for entry in flat.get("series") or []}
 
     metrics: list[dict[str, Any]] = []
-    for metric_id in ("unemployment_rate", "labor_force_participation"):
+    for metric_id in (
+        LaborAgeMetricId.UNEMPLOYMENT_RATE.value,
+        LaborAgeMetricId.LABOR_FORCE_PARTICIPATION.value,
+    ):
         metric_name, by_age = _LABOR_AGE_METRIC_DEFINITIONS[metric_id]
         age_series: list[dict[str, Any]] = []
         for age_group in _AGE_GROUPS:

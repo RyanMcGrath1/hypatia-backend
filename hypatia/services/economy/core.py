@@ -12,6 +12,7 @@ from typing import Any
 
 import requests
 
+from hypatia.models import EconomySectionKey, InflationAcceleration, SentimentStatus, TrendDirection
 from hypatia.utils.logging_config import log_upstream
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ OVERVIEW_RECENT_OBSERVATIONS = 10
 # CPI overview needs extra history for YoY on each displayed month. Buffer beyond
 # (display + 12) absorbs duplicate observation dates (revisions) so calendar lookups
 # still resolve t-1 / t-12 months.
-OVERVIEW_INFLATION_SECTION_KEY = "inflation"
+OVERVIEW_INFLATION_SECTION_KEY = EconomySectionKey.INFLATION.value
 OVERVIEW_INFLATION_FRED_LIMIT = OVERVIEW_RECENT_OBSERVATIONS + 12 + 26
 
 
@@ -111,37 +112,37 @@ class EconomyOverviewDef:
 
 OVERVIEW_SERIES: tuple[EconomyOverviewDef, ...] = (
     EconomyOverviewDef(
-        section_key="gdp",
+        section_key=EconomySectionKey.GDP.value,
         series_id="GDPC1",
         label="Real Gross Domestic Product",
         unit="billions of chained 2017 dollars",
     ),
     EconomyOverviewDef(
-        section_key="consumer_spending",
+        section_key=EconomySectionKey.CONSUMER_SPENDING.value,
         series_id="PCE",
         label="Personal Consumption Expenditures",
         unit="billions of dollars",
     ),
     EconomyOverviewDef(
-        section_key="labor",
+        section_key=EconomySectionKey.LABOR.value,
         series_id="UNRATE",
         label="Unemployment Rate",
         unit="percent",
     ),
     EconomyOverviewDef(
-        section_key="interest_rates",
+        section_key=EconomySectionKey.INTEREST_RATES.value,
         series_id="FEDFUNDS",
         label="Federal Funds Effective Rate",
         unit="percent",
     ),
     EconomyOverviewDef(
-        section_key="inflation",
+        section_key=EconomySectionKey.INFLATION.value,
         series_id="CPIAUCSL",
         label="Consumer Price Index for All Urban Consumers: All Items",
         unit="index",
     ),
     EconomyOverviewDef(
-        section_key="housing",
+        section_key=EconomySectionKey.HOUSING.value,
         series_id="CSUSHPISA",
         label="S&P/Case-Shiller U.S. National Home Price Index",
         unit="index",
@@ -281,10 +282,10 @@ def _inflation_acceleration(mom_current: float | None, mom_prior_month: float | 
     if mom_current is None or mom_prior_month is None:
         return None
     if math.isclose(mom_current, mom_prior_month, rel_tol=0.0, abs_tol=5e-3):
-        return "flat"
+        return InflationAcceleration.FLAT.value
     if mom_current > mom_prior_month:
-        return "accelerating"
-    return "decelerating"
+        return InflationAcceleration.ACCELERATING.value
+    return InflationAcceleration.DECELERATING.value
 
 
 def _attach_inflation_derived_fields(
@@ -451,13 +452,17 @@ def _fetch_overview_series(
 # ---------------------------------------------------------------------------
 
 SENTIMENT_COMPOSITE_SECTION_KEYS: tuple[str, ...] = (
-    "labor",
-    "inflation",
-    "interest_rates",
-    "gdp",
+    EconomySectionKey.LABOR.value,
+    EconomySectionKey.INFLATION.value,
+    EconomySectionKey.INTEREST_RATES.value,
+    EconomySectionKey.GDP.value,
 )
 _INVERSE_SENTIMENT_SECTIONS: frozenset[str] = frozenset(
-    {"labor", "inflation", "interest_rates"}
+    {
+        EconomySectionKey.LABOR.value,
+        EconomySectionKey.INFLATION.value,
+        EconomySectionKey.INTEREST_RATES.value,
+    }
 )
 SENTIMENT_VIX_SERIES_ID = "VIXCLS"
 SENTIMENT_STABILITY_SERIES_ID = "CFNAIMA3"
@@ -498,13 +503,13 @@ def _sentiment_history_for_section(
     if section.get("error") or not section.get("observations"):
         return []
     chrono = _observations_chronological(section)
-    if section_key == "inflation":
+    if section_key == EconomySectionKey.INFLATION.value:
         return [
             yoy
             for o in chrono
             if (yoy := _observation_numeric(o.get("yoyInflation"))) is not None
         ]
-    if section_key == "gdp":
+    if section_key == EconomySectionKey.GDP.value:
         return _gdp_qoq_annualized_history(chrono)
     return [
         v
@@ -515,27 +520,31 @@ def _sentiment_history_for_section(
 
 def _metric_trend_from_history(values: list[float]) -> str:
     if len(values) < 2:
-        return "flat"
+        return TrendDirection.FLAT.value
     first, last = values[0], values[-1]
     if last > first:
-        return "up"
+        return TrendDirection.UP.value
     if last < first:
-        return "down"
-    return "flat"
+        return TrendDirection.DOWN.value
+    return TrendDirection.FLAT.value
 
 
 def _sentiment_trend(section_key: str, metric_trend: str) -> str:
-    if metric_trend == "flat":
-        return "flat"
+    if metric_trend == TrendDirection.FLAT.value:
+        return TrendDirection.FLAT.value
     if section_key in _INVERSE_SENTIMENT_SECTIONS:
-        return "down" if metric_trend == "up" else "up"
+        return (
+            TrendDirection.DOWN.value
+            if metric_trend == TrendDirection.UP.value
+            else TrendDirection.UP.value
+        )
     return metric_trend
 
 
 def _sentiment_trend_points(trend: str) -> int:
-    if trend == "up":
+    if trend == TrendDirection.UP.value:
         return 1
-    if trend == "down":
+    if trend == TrendDirection.DOWN.value:
         return -1
     return 0
 
@@ -638,10 +647,10 @@ def _cfnai_stability_score(obs_newest_first: list[dict[str, Any]]) -> float | No
 
 def _sentiment_status_label(score: float) -> str:
     if score >= 70:
-        return "OPTIMAL"
+        return SentimentStatus.OPTIMAL.value
     if score >= 45:
-        return "STEADY"
-    return "WEAK"
+        return SentimentStatus.STEADY.value
+    return SentimentStatus.WEAK.value
 
 
 def _build_economy_sentiment_block(

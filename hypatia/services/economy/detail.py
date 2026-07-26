@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from hypatia.models import RiskLevel
 from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import (
     FRED_OBSERVATIONS_URL,
@@ -337,43 +338,43 @@ _GDP_HEADWIND_FETCH_TARGETS: tuple[tuple[str, str, str | None], ...] = (
 
 
 def _headwind_risk_label(level: str) -> str:
-    return {"high": "High Risk", "medium": "Medium Risk", "low": "Low Risk"}.get(
-        level,
-        "Medium Risk",
-    )
+    try:
+        return RiskLevel(level).label
+    except ValueError:
+        return RiskLevel.MEDIUM.label
 
 
 def _freight_shipments_risk_level(mom_pct: float) -> str:
     """Risk from Cass freight shipment MoM % change (``units=pch``)."""
     if mom_pct <= -2.0:
-        return "high"
+        return RiskLevel.HIGH.value
     if mom_pct <= 0:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _fed_funds_risk_level(upper: float) -> str:
     if upper >= 5.0:
-        return "high"
+        return RiskLevel.HIGH.value
     if upper >= 3.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _yield_curve_risk_level(value: float) -> str:
     if value < 0:
-        return "high"
+        return RiskLevel.HIGH.value
     if value < 0.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _core_pce_risk_level(value: float) -> str:
     if value > 3.5:
-        return "high"
+        return RiskLevel.HIGH.value
     if value > 2.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _fetch_fred_recent_observations(

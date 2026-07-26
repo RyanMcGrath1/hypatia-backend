@@ -11,6 +11,7 @@ import time
 import requests
 from flask import Blueprint, jsonify, request
 
+from hypatia.models import FredObservationParam, FredUnitsMode
 from hypatia.routes.economy._common import fred_api_key_or_response, sector_window_from_request
 from hypatia.services.economy import (
     FRED_OBSERVATIONS_URL,
@@ -23,22 +24,7 @@ from hypatia.utils.logging_config import log_upstream
 
 bp = Blueprint("labor_market_controller", __name__, url_prefix="/api/economy/labor")
 
-_FRED_OBSERVATIONS_FORWARD_PARAMS = frozenset(
-    {
-        "series_id",
-        "realtime_start",
-        "realtime_end",
-        "observation_start",
-        "observation_end",
-        "units",
-        "frequency",
-        "aggregation_method",
-        "output_type",
-        "limit",
-        "offset",
-        "sort_order",
-    }
-)
+_FRED_OBSERVATIONS_FORWARD_PARAMS = FredObservationParam.values()
 
 _FRED_OBS_DEFAULT_LIMIT = 60
 _FRED_OBS_LIMIT_MAX = 10_000
@@ -103,7 +89,7 @@ def _fred_observations_proxy(*, series_id: str, units: str | None = None):
 @bp.get("/payems/delta") # /api/economy/labor/payems/delta
 def labor_payems_delta_series():
     """Jobs created/destroyed month-over-month (PAYEMS via FRED ``units=chg``)."""
-    return _fred_observations_proxy(series_id=_PAYEMS_SERIES_ID, units="chg")
+    return _fred_observations_proxy(series_id=_PAYEMS_SERIES_ID, units=FredUnitsMode.CHG.value)
 
 
 @bp.get("/sector") # /api/economy/labor/sector
