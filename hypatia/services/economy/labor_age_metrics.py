@@ -179,7 +179,7 @@ def build_labor_age_metrics(
     emp_pop_series = [_emp_pop_series_entry(age_group, by_fred_id) for age_group in _AGE_GROUPS]
     metrics.append(
         {
-            "id": "employment_population_ratio",
+            "id": LaborAgeMetricId.EMPLOYMENT_POPULATION_RATIO.value,
             "name": "Employment-Population Ratio",
             "series": emp_pop_series,
         }

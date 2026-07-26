@@ -139,11 +139,20 @@ class GdpSectorKey(str, Enum):
 
 
 class GdpHeadwindKey(str, Enum):
-    """Internal / response keys for GDP growth-headwinds fetches."""
+    """Internal fetch keys for GDP growth-headwinds FRED pulls."""
 
     SUPPLY_CHAIN = "supply_chain"
     FED_LOWER = "fed_lower"
     FED_UPPER = "fed_upper"
+    YIELD_CURVE = "yield_curve"
+    INFLATION = "inflation"
+
+
+class GdpHeadwindCardKey(str, Enum):
+    """Public ``key`` values on GDP growth-headwinds response cards."""
+
+    SUPPLY_CHAIN = "supply_chain"
+    INTEREST_RATES = "interest_rates"
     YIELD_CURVE = "yield_curve"
     INFLATION = "inflation"
 
@@ -164,3 +173,17 @@ class PceMetricKey(str, Enum):
 
     HEADLINE = "headline"
     CORE = "core"
+
+
+class OpenFecNamesParam(str, Enum):
+    """Query params handled by the OpenFEC candidate-names proxy."""
+
+    Q = "q"
+    NAME = "name"
+    TYPEAHEAD = "typeahead"
+    PAGE = "page"
+    PER_PAGE = "per_page"
+
+    @classmethod
+    def values(cls) -> frozenset[str]:
+        return frozenset(member.value for member in cls)

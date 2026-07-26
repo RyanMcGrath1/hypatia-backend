@@ -12,7 +12,13 @@ from typing import Any
 
 import requests
 
-from hypatia.models import EconomySectionKey, InflationAcceleration, SentimentStatus, TrendDirection
+from hypatia.models import (
+    EconomySectionKey,
+    FredSortOrder,
+    InflationAcceleration,
+    SentimentStatus,
+    TrendDirection,
+)
 from hypatia.utils.logging_config import log_upstream
 
 logger = logging.getLogger(__name__)
@@ -335,7 +341,7 @@ def _fetch_overview_series(
         "series_id": overview.series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(fred_cap),
     }
     if observation_end:
@@ -567,11 +573,11 @@ def _composite_sentiment_score(sections: dict[str, Any]) -> tuple[float, str, in
         used += 1
     score = round(max(0.0, min(100.0, 50.0 + 12.5 * points)), 1)
     if points > 0:
-        trend = "up"
+        trend = TrendDirection.UP.value
     elif points < 0:
-        trend = "down"
+        trend = TrendDirection.DOWN.value
     else:
-        trend = "flat"
+        trend = TrendDirection.FLAT.value
     return score, trend, used
 
 
@@ -587,7 +593,7 @@ def _fetch_fred_compact_observations(
         "series_id": series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(limit),
     }
     if observation_end:
@@ -798,7 +804,7 @@ def fetch_fred_series(
         "api_key": api_key,
         "file_type": "json",
         "observation_start": start_date,
-        "sort_order": "asc",
+        "sort_order": FredSortOrder.ASC.value,
     }
     if end_date:
         params["observation_end"] = end_date
@@ -955,7 +961,7 @@ def build_cpi_recent(api_key: str) -> tuple[dict[str, Any], int]:
         "series_id": CPI_SERIES_ID,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(CPI_RECENT_MONTHS),
     }
     t0 = time.perf_counter()
