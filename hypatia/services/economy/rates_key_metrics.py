@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from hypatia.models import FredSortOrder
 from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import FRED_OBSERVATIONS_URL, FRED_REQUEST_TIMEOUT
 
@@ -51,7 +52,7 @@ def _fetch_fred_latest(api_key: str, series_id: str) -> dict[str, Any]:
         "series_id": series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(RATES_KEY_METRICS_FETCH_LIMIT),
     }
     t0 = time.perf_counter()

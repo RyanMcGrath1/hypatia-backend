@@ -6,6 +6,7 @@ import concurrent.futures
 from datetime import datetime, timezone
 from typing import Any
 
+from hypatia.models import CpiComponentKey
 from hypatia.services.economy.pce_vs_target import (
     _NETWORK_ERROR_PREFIXES,
     _fetch_fred_pc1_latest,
@@ -16,11 +17,16 @@ CPI_HEADLINE_LABEL = "Headline CPI"
 
 # (key, FRED series_id, display label, parent component keys when nested)
 CPI_COMPONENT_DEFS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("shelter", "CUSR0000SAH1", "Shelter", ("core_services",)),
-    ("food", "CPIUFDSL", "Food", ()),
-    ("energy", "CPIENGSL", "Energy", ()),
-    ("core_goods", "CUSR0000SACL1E", "Core Goods", ()),
-    ("core_services", "CUSR0000SASLE", "Core Services", ()),
+    (
+        CpiComponentKey.SHELTER.value,
+        "CUSR0000SAH1",
+        "Shelter",
+        (CpiComponentKey.CORE_SERVICES.value,),
+    ),
+    (CpiComponentKey.FOOD.value, "CPIUFDSL", "Food", ()),
+    (CpiComponentKey.ENERGY.value, "CPIENGSL", "Energy", ()),
+    (CpiComponentKey.CORE_GOODS.value, "CUSR0000SACL1E", "Core Goods", ()),
+    (CpiComponentKey.CORE_SERVICES.value, "CUSR0000SASLE", "Core Services", ()),
 )
 
 
@@ -73,7 +79,9 @@ def build_cpi_components(api_key: str) -> tuple[dict[str, Any], bool]:
     when every FRED request hit a network-level error (timeout/connection).
     """
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    fetch_targets: list[tuple[str, str]] = [("headline", CPI_HEADLINE_SERIES_ID)]
+    fetch_targets: list[tuple[str, str]] = [
+        (CpiComponentKey.HEADLINE.value, CPI_HEADLINE_SERIES_ID)
+    ]
     fetch_targets.extend((key, series_id) for key, series_id, _label, _parents in CPI_COMPONENT_DEFS)
 
     results: dict[str, dict[str, Any]] = {}
@@ -96,7 +104,7 @@ def build_cpi_components(api_key: str) -> tuple[dict[str, Any], bool]:
         if err and str(err).startswith(_NETWORK_ERROR_PREFIXES):
             network_failed += 1
 
-    headline_result = results["headline"]
+    headline_result = results[CpiComponentKey.HEADLINE.value]
     components = [
         _metric_payload(
             key=key,

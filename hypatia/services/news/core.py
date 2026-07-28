@@ -8,23 +8,13 @@ from typing import Any
 
 import requests
 
+from hypatia.models import GNewsHeadlineParam
 from hypatia.utils.logging_config import log_upstream
 
 GNEWS_BASE = "https://gnews.io/api/v4"
 
 # Top headlines: optional filters forwarded to GNews (not page/max/offset; those are handled below).
-TOP_HEADLINES_UPSTREAM_PARAMS = frozenset(
-    {
-        "category",
-        "lang",
-        "country",
-        "nullable",
-        "from",
-        "to",
-        "q",
-        "truncate",
-    }
-)
+TOP_HEADLINES_UPSTREAM_PARAMS = GNewsHeadlineParam.values()
 
 TOP_HEADLINES_PAGE_SIZE_DEFAULT = 20
 TOP_HEADLINES_PAGE_SIZE_MAX = 50

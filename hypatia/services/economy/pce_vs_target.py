@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from hypatia.models import FredSortOrder, FredUnitsMode, PceMetricKey
 from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import FRED_OBSERVATIONS_URL, FRED_REQUEST_TIMEOUT
 
@@ -22,7 +23,7 @@ PCE_HEADLINE_LABEL = "PCE Headline"
 PCE_CORE_SERIES_ID = "PCEPILFE"
 PCE_CORE_LABEL = "Core PCE"
 
-PCE_YOY_UNITS = "pc1"
+PCE_YOY_UNITS = FredUnitsMode.PC1.value
 PCE_YOY_FETCH_LIMIT = 2
 
 _NETWORK_ERROR_PREFIXES = (
@@ -54,7 +55,7 @@ def _fetch_fred_pc1_latest(api_key: str, series_id: str) -> dict[str, Any]:
         "api_key": api_key,
         "file_type": "json",
         "units": PCE_YOY_UNITS,
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(PCE_YOY_FETCH_LIMIT),
     }
     t0 = time.perf_counter()
@@ -153,8 +154,8 @@ def build_pce_vs_target(api_key: str) -> tuple[dict[str, Any], bool]:
     """
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     series_defs = (
-        (PCE_HEADLINE_SERIES_ID, PCE_HEADLINE_LABEL, "headline"),
-        (PCE_CORE_SERIES_ID, PCE_CORE_LABEL, "core"),
+        (PCE_HEADLINE_SERIES_ID, PCE_HEADLINE_LABEL, PceMetricKey.HEADLINE.value),
+        (PCE_CORE_SERIES_ID, PCE_CORE_LABEL, PceMetricKey.CORE.value),
     )
 
     results: dict[str, dict[str, Any]] = {}
@@ -178,12 +179,12 @@ def build_pce_vs_target(api_key: str) -> tuple[dict[str, Any], bool]:
         "headline": _metric_payload(
             series_id=PCE_HEADLINE_SERIES_ID,
             label=PCE_HEADLINE_LABEL,
-            fetch_result=results["headline"],
+            fetch_result=results[PceMetricKey.HEADLINE.value],
         ),
         "core": _metric_payload(
             series_id=PCE_CORE_SERIES_ID,
             label=PCE_CORE_LABEL,
-            fetch_result=results["core"],
+            fetch_result=results[PceMetricKey.CORE.value],
         ),
     }
     return payload, network_failed == len(series_defs)

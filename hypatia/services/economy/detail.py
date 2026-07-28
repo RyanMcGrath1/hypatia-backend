@@ -10,6 +10,15 @@ from typing import Any
 
 import requests
 
+from hypatia.models import (
+    EconomySectionKey,
+    FredSortOrder,
+    FredUnitsMode,
+    GdpHeadwindCardKey,
+    GdpHeadwindKey,
+    GdpSectorKey,
+    RiskLevel,
+)
 from hypatia.utils.logging_config import log_upstream
 from hypatia.services.economy.core import (
     FRED_OBSERVATIONS_URL,
@@ -31,9 +40,9 @@ GDP_SECTOR_CONTRIBUTION_FETCH_LIMIT = 1
 
 # BEA real value added by industry (billions chained 2017 dollars, SAAR).
 GDP_SECTOR_CONTRIBUTION_DEFS: tuple[tuple[str, str, str], ...] = (
-    ("services", "RVASPI", "Services"),
-    ("manufacturing", "RVAMA", "Manufacturing"),
-    ("agriculture", "RVAAFH", "Agriculture"),
+    (GdpSectorKey.SERVICES.value, "RVASPI", "Services"),
+    (GdpSectorKey.MANUFACTURING.value, "RVAMA", "Manufacturing"),
+    (GdpSectorKey.AGRICULTURE.value, "RVAAFH", "Agriculture"),
 )
 
 logger = logging.getLogger(__name__)
@@ -170,7 +179,7 @@ def _fetch_fred_latest_level(api_key: str, series_id: str) -> dict[str, Any]:
         "series_id": series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(GDP_SECTOR_CONTRIBUTION_FETCH_LIMIT),
     }
     t0 = time.perf_counter()
@@ -246,7 +255,7 @@ def build_gdp_sector_contribution(api_key: str) -> tuple[dict[str, Any], bool]:
     ``GDPC1`` for the latest common BEA quarter (percent, one decimal).
     """
     as_of = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    fetch_targets: list[tuple[str, str]] = [("gdp", GDP_TOTAL_SERIES_ID)]
+    fetch_targets: list[tuple[str, str]] = [(EconomySectionKey.GDP.value, GDP_TOTAL_SERIES_ID)]
     fetch_targets.extend((key, series_id) for key, series_id, _label in GDP_SECTOR_CONTRIBUTION_DEFS)
 
     results: dict[str, dict[str, Any]] = {}
@@ -265,7 +274,7 @@ def build_gdp_sector_contribution(api_key: str) -> tuple[dict[str, Any], bool]:
         if err and str(err).startswith(_NETWORK_ERROR_PREFIXES):
             network_failed += 1
 
-    gdp_result = results["gdp"]
+    gdp_result = results[EconomySectionKey.GDP.value]
     gdp_value = gdp_result.get("value")
     gdp_date = gdp_result.get("observation_date")
 
@@ -320,60 +329,60 @@ GDP_GROWTH_HEADWINDS_FETCH_LIMIT = 2
 FED_PCE_INFLATION_TARGET = 2.0
 
 GDP_HEADWIND_SUPPLY_CHAIN_SERIES_ID = "FRGSHPUSM649NCIS"
-GDP_HEADWIND_SUPPLY_CHAIN_UNITS = "pch"
+GDP_HEADWIND_SUPPLY_CHAIN_UNITS = FredUnitsMode.PCH.value
 GDP_HEADWIND_FED_LOWER_SERIES_ID = "DFEDTARL"
 GDP_HEADWIND_FED_UPPER_SERIES_ID = "DFEDTARU"
 GDP_HEADWIND_YIELD_CURVE_SERIES_ID = "T10Y2Y"
 GDP_HEADWIND_INFLATION_SERIES_ID = "PCEPILFE"
-GDP_HEADWIND_INFLATION_UNITS = "pc1"
+GDP_HEADWIND_INFLATION_UNITS = FredUnitsMode.PC1.value
 
 _GDP_HEADWIND_FETCH_TARGETS: tuple[tuple[str, str, str | None], ...] = (
-    ("supply_chain", GDP_HEADWIND_SUPPLY_CHAIN_SERIES_ID, GDP_HEADWIND_SUPPLY_CHAIN_UNITS),
-    ("fed_lower", GDP_HEADWIND_FED_LOWER_SERIES_ID, None),
-    ("fed_upper", GDP_HEADWIND_FED_UPPER_SERIES_ID, None),
-    ("yield_curve", GDP_HEADWIND_YIELD_CURVE_SERIES_ID, None),
-    ("inflation", GDP_HEADWIND_INFLATION_SERIES_ID, GDP_HEADWIND_INFLATION_UNITS),
+    (GdpHeadwindKey.SUPPLY_CHAIN.value, GDP_HEADWIND_SUPPLY_CHAIN_SERIES_ID, GDP_HEADWIND_SUPPLY_CHAIN_UNITS),
+    (GdpHeadwindKey.FED_LOWER.value, GDP_HEADWIND_FED_LOWER_SERIES_ID, None),
+    (GdpHeadwindKey.FED_UPPER.value, GDP_HEADWIND_FED_UPPER_SERIES_ID, None),
+    (GdpHeadwindKey.YIELD_CURVE.value, GDP_HEADWIND_YIELD_CURVE_SERIES_ID, None),
+    (GdpHeadwindKey.INFLATION.value, GDP_HEADWIND_INFLATION_SERIES_ID, GDP_HEADWIND_INFLATION_UNITS),
 )
 
 
 def _headwind_risk_label(level: str) -> str:
-    return {"high": "High Risk", "medium": "Medium Risk", "low": "Low Risk"}.get(
-        level,
-        "Medium Risk",
-    )
+    try:
+        return RiskLevel(level).label
+    except ValueError:
+        return RiskLevel.MEDIUM.label
 
 
 def _freight_shipments_risk_level(mom_pct: float) -> str:
     """Risk from Cass freight shipment MoM % change (``units=pch``)."""
     if mom_pct <= -2.0:
-        return "high"
+        return RiskLevel.HIGH.value
     if mom_pct <= 0:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _fed_funds_risk_level(upper: float) -> str:
     if upper >= 5.0:
-        return "high"
+        return RiskLevel.HIGH.value
     if upper >= 3.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _yield_curve_risk_level(value: float) -> str:
     if value < 0:
-        return "high"
+        return RiskLevel.HIGH.value
     if value < 0.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _core_pce_risk_level(value: float) -> str:
     if value > 3.5:
-        return "high"
+        return RiskLevel.HIGH.value
     if value > 2.5:
-        return "medium"
-    return "low"
+        return RiskLevel.MEDIUM.value
+    return RiskLevel.LOW.value
 
 
 def _fetch_fred_recent_observations(
@@ -388,7 +397,7 @@ def _fetch_fred_recent_observations(
         "series_id": series_id,
         "api_key": api_key,
         "file_type": "json",
-        "sort_order": "desc",
+        "sort_order": FredSortOrder.DESC.value,
         "limit": str(limit),
     }
     if units:
@@ -469,7 +478,7 @@ def _fetch_fred_recent_observations(
 
 def _supply_chain_headwind(fetch_result: dict[str, Any]) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "key": "supply_chain",
+        "key": GdpHeadwindCardKey.SUPPLY_CHAIN.value,
         "series_id": GDP_HEADWIND_SUPPLY_CHAIN_SERIES_ID,
         "title": "Supply Chain",
         "value": None,
@@ -525,7 +534,7 @@ def _interest_rates_headwind(
     upper_result: dict[str, Any],
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "key": "interest_rates",
+        "key": GdpHeadwindCardKey.INTEREST_RATES.value,
         "series_id": GDP_HEADWIND_FED_UPPER_SERIES_ID,
         "title": "Interest Rates",
         "value": None,
@@ -574,7 +583,7 @@ def _interest_rates_headwind(
 
 def _yield_curve_headwind(fetch_result: dict[str, Any]) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "key": "yield_curve",
+        "key": GdpHeadwindCardKey.YIELD_CURVE.value,
         "series_id": GDP_HEADWIND_YIELD_CURVE_SERIES_ID,
         "title": "Yield Curve",
         "value": None,
@@ -615,7 +624,7 @@ def _yield_curve_headwind(fetch_result: dict[str, Any]) -> dict[str, Any]:
 
 def _inflation_headwind(fetch_result: dict[str, Any]) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "key": "inflation",
+        "key": GdpHeadwindCardKey.INFLATION.value,
         "series_id": GDP_HEADWIND_INFLATION_SERIES_ID,
         "title": "Inflation",
         "value": None,
@@ -692,10 +701,13 @@ def build_gdp_growth_headwinds(api_key: str) -> tuple[dict[str, Any], bool]:
             network_failed += 1
 
     risks = [
-        _supply_chain_headwind(results["supply_chain"]),
-        _interest_rates_headwind(results["fed_lower"], results["fed_upper"]),
-        _yield_curve_headwind(results["yield_curve"]),
-        _inflation_headwind(results["inflation"]),
+        _supply_chain_headwind(results[GdpHeadwindKey.SUPPLY_CHAIN.value]),
+        _interest_rates_headwind(
+            results[GdpHeadwindKey.FED_LOWER.value],
+            results[GdpHeadwindKey.FED_UPPER.value],
+        ),
+        _yield_curve_headwind(results[GdpHeadwindKey.YIELD_CURVE.value]),
+        _inflation_headwind(results[GdpHeadwindKey.INFLATION.value]),
     ]
 
     return {"as_of": as_of, "risks": risks}, network_failed == len(

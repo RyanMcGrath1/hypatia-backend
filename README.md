@@ -49,7 +49,7 @@ Copy [.env.example](.env.example) to `.env` and set `FRED_API_KEY` (economy rout
 
 **API keys**
 
-- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/dashboard`, `GET /api/economy/labor/sector`, `GET /api/economy/fred/series/PAYEMS/delta`, and related labor/rates/inflation/GDP widgets)
+- `FRED_API_KEY` — [FRED API](https://fred.stlouisfed.org/docs/api/api_key.html) key from [your FRED account](https://fredaccount.stlouisfed.org/apikeys); required for economy routes (`GET /api/economy/dashboard`, `GET /api/economy/labor/sector`, `GET /api/economy/labor/payems/delta`, and related labor/rates/inflation/GDP widgets)
 - `GNEWS_API_KEY` — [GNews](https://gnews.io/) API key; required for `GET /api/news/top-headlines`
 - `OPENFEC_API_KEY` — [OpenFEC](https://api.open.fec.gov/developers/) API key; required for `GET /api/fec/candidates`
 
@@ -129,7 +129,7 @@ With multiple Gunicorn workers, set **`AUTH_RATE_LIMIT_STORAGE_URI`** to a share
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | JSON liveness check (load balancers) |
-| GET | `/api/economy/cpi` | Last 5 months of FRED ``CPIAUCSL`` (Consumer Price Index), newest first; JSON has `as_of`, `series_id`, `label`, `unit`, `observations` |
+| GET | `/api/economy/inflation/cpi` | Last 5 months of FRED ``CPIAUCSL`` (Consumer Price Index), newest first; JSON has `as_of`, `series_id`, `label`, `unit`, `observations` |
 | GET | `/api/economy/inflation/pce-vs-target` | Headline ``PCEPI`` and core ``PCEPILFE`` YoY (``units=pc1``) vs Fed 2% target; JSON has `as_of`, `target`, `headline`, `core` |
 | GET | `/api/economy/inflation/cpi-components` | Headline ``CPIAUCSL`` and CPI component YoY (shelter, food, energy, core goods, core services); JSON has `as_of`, `observation_date`, `headline`, `components` |
 | GET | `/api/economy/dashboard` | Economy tab snapshot: recent FRED observations per section; JSON has `as_of` and `sections` (see [Economy dashboard](#economy-dashboard-apieconomydashboard)) |
@@ -141,7 +141,7 @@ With multiple Gunicorn workers, set **`AUTH_RATE_LIMIT_STORAGE_URI`** to a share
 | GET | `/api/economy/rates/fed-funds-target` | FOMC fed funds target range via FRED ``DFEDTARL`` and ``DFEDTARU``; JSON has `as_of`, `target_lower`, `target_upper`, `observation_date`, and `series` (see [Fed funds target range](#fed-funds-target-range-apieconomyratesfed-funds-target)) |
 | GET | `/api/economy/rates/key-metrics` | Latest ``DGS10``, ``MORTGAGE30US``, and ``DGS2`` for the rates detail KEY METRICS widget; JSON has `as_of` and `metrics` (see [Rates key metrics](#rates-key-metrics-apieconomyrateskey-metrics)) |
 | GET | `/api/economy/labor/age-metrics` | Unemployment, labor force participation, and employment-population ratio by age cohort (12 FRED `LNS*` series); see [Labor age metrics](#labor-age-metrics-apieconomylaborage-metrics) |
-| GET | `/api/economy/fred/series/PAYEMS/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
+| GET | `/api/economy/labor/payems/delta` | PAYEMS-only monthly deltas via FRED observations (`units=chg`); optional `observation_start`, `observation_end`, `sort_order`, `limit` |
 | GET | `/api/fec/candidates?...` | Proxies [OpenFEC `names/candidates`](https://api.open.fec.gov/developers/#/names/get_v1_names_candidates); `api_key` from env only |
 | GET | `/api/news/top-headlines` | [GNews top headlines](https://docs.gnews.io/endpoints/top-headlines-endpoint) with **page/max pagination** and a stable JSON envelope; see [News routes](#news-routes) |
 
@@ -149,7 +149,7 @@ Economy routes that need FRED return **503** with `Missing FRED_API_KEY` when `F
 
 Unknown paths return **404** with JSON `{"error": "Not Found"}`. Unhandled server errors return **500** with JSON `{"error": "Internal Server Error"}`.
 
-### Recent CPI (`/api/economy/cpi`)
+### Recent CPI (`/api/economy/inflation/cpi`)
 
 Returns the **5 most recent** monthly observations for FRED series **`CPIAUCSL`** (Consumer Price Index for All Urban Consumers: All Items), newest first.
 
@@ -165,7 +165,7 @@ Missing `FRED_API_KEY` → **503**. Upstream FRED errors are forwarded (e.g. **4
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/cpi"
+curl -sS "http://127.0.0.1:5001/api/economy/inflation/cpi"
 ```
 
 ### Economy dashboard (`/api/economy/dashboard`)
@@ -185,14 +185,14 @@ Example:
 curl -sS "http://127.0.0.1:5001/api/economy/dashboard"
 ```
 
-### PAYEMS monthly deltas (`/api/economy/fred/series/PAYEMS/delta`)
+### PAYEMS monthly deltas (`/api/economy/labor/payems/delta`)
 
 Returns PAYEMS month-over-month deltas directly from FRED (`units=chg`) so clients do not need to subtract levels manually. The server still injects `api_key` and `file_type=json`. Optional query params include `observation_start`, `limit`, and `sort_order`.
 
 Example:
 
 ```bash
-curl -sS "http://127.0.0.1:5001/api/economy/fred/series/PAYEMS/delta?limit=72&sort_order=desc"
+curl -sS "http://127.0.0.1:5001/api/economy/labor/payems/delta?limit=72&sort_order=desc"
 ```
 
 ### Labor employment by sector (`/api/economy/labor/sector`)
