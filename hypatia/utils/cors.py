@@ -49,6 +49,17 @@ def init_cors(app: Flask) -> None:
         app,
         origins=expo_cors_origins(),
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-        allow_headers=["Content-Type", "Accept", "Authorization"],
+        # Request allow-list must match Hypatia frontend httpClient.ts headers:
+        # Accept, Cache-Control, Pragma, X-Request-ID always; Content-Type on
+        # JSON bodies; Authorization when a Bearer token is supplied.
+        # expose_headers only covers response readability (X-Request-ID echo).
+        allow_headers=[
+            "Accept",
+            "Authorization",
+            "Cache-Control",
+            "Content-Type",
+            "Pragma",
+            "X-Request-ID",
+        ],
         expose_headers=["X-Request-ID"],
     )

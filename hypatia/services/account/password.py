@@ -1,0 +1,141 @@
+"""Change-password flow for the authenticated current user.
+
+After a successful PASSWORD_CHANGED commit, a best-effort security
+notification is emailed to the account's current address. Delivery failure
+does not undo the password change or session rotation.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from hypatia.extensions import db
+from hypatia.models import Session, User
+from hypatia.services.audit import record_account_event
+from hypatia.services.auth.constants import EVENT_PASSWORD_CHANGED
+from hypatia.services.auth.mfa_challenge import delete_mfa_login_challenges_for_user
+from hypatia.services.auth.passwords import hash_password, verify_password
+from hypatia.services.auth.sessions import create_session, revoke_all_sessions_for_user
+from hypatia.services.auth.validation import validate_password
+from hypatia.services.email import EmailDeliveryError, EmailNotConfiguredError, send_email
+
+logger = logging.getLogger(__name__)
+
+CURRENT_PASSWORD_INCORRECT_MESSAGE = "Current password is incorrect"
+NEW_PASSWORDS_DO_NOT_MATCH_MESSAGE = "New passwords do not match"
+
+_PASSWORD_CHANGED_NOTIFY_SUBJECT = "Your Hypatia password was changed"
+_PASSWORD_CHANGED_NOTIFY_BODY = (
+    "Your Hypatia password was changed.\n"
+    "\n"
+    "If you made this change, no further action is needed.\n"
+    "\n"
+    "If you did not make this change, your account may have been compromised.\n"
+)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize DB timestamps (SQLite may return naive UTC)."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _iso8601(value: datetime) -> str:
+    return _as_utc(value).replace(microsecond=0).isoformat()
+
+
+@dataclass(frozen=True, slots=True)
+class ChangePasswordResult:
+    ok: bool
+    error: str | None = None
+    raw_token: str | None = None
+    password_changed_at: str | None = None
+
+
+def _send_password_changed_notification(*, to_address: str) -> None:
+    try:
+        send_email(
+            to_address=to_address,
+            subject=_PASSWORD_CHANGED_NOTIFY_SUBJECT,
+            text_body=_PASSWORD_CHANGED_NOTIFY_BODY,
+        )
+    except (EmailDeliveryError, EmailNotConfiguredError) as exc:
+        logger.error(
+            "Password change notification failed error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def change_user_password(
+    user: User,
+    current_session: Session,
+    *,
+    current_password: str,
+    new_password: str,
+    confirm_new_password: str,
+    ip_address: str | None = None,
+    request_id: str | None = None,
+    user_agent: str | None = None,
+) -> ChangePasswordResult:
+    """Verify the current password, set a new one, and rotate all sessions.
+
+    Identity comes from ``user`` / ``current_session`` (authenticated request
+    context), never from client-supplied user ids. On success: update hash,
+    set ``password_changed_at``, invalidate outstanding MFA login challenges
+    and pending email-change requests, revoke all sessions (including
+    ``current_session``), create one replacement session, and record
+    ``PASSWORD_CHANGED`` — all in one database transaction. A security
+    notification email is attempted only after that commit succeeds.
+    """
+    if current_session.user_id != user.id:
+        raise ValueError("current_session does not belong to user")
+
+    if not verify_password(user.password_hash, current_password):
+        return ChangePasswordResult(ok=False, error=CURRENT_PASSWORD_INCORRECT_MESSAGE)
+
+    if new_password != confirm_new_password:
+        return ChangePasswordResult(ok=False, error=NEW_PASSWORDS_DO_NOT_MATCH_MESSAGE)
+
+    password_result = validate_password(new_password)
+    if not password_result.ok:
+        return ChangePasswordResult(ok=False, error=password_result.error)
+
+    # Local import avoids a circular dependency with email_change (which
+    # imports CURRENT_PASSWORD_INCORRECT_MESSAGE from this module).
+    from hypatia.services.account.email_change import (
+        delete_email_change_requests_for_user,
+    )
+
+    now = _utcnow()
+    try:
+        user.password_hash = hash_password(new_password)
+        user.password_changed_at = now
+        delete_mfa_login_challenges_for_user(user.id)
+        delete_email_change_requests_for_user(user.id, pending_only=True)
+        revoke_all_sessions_for_user(user)
+        raw_token, _new_session = create_session(user)
+        record_account_event(
+            user,
+            EVENT_PASSWORD_CHANGED,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    _send_password_changed_notification(to_address=user.email)
+    return ChangePasswordResult(
+        ok=True,
+        raw_token=raw_token,
+        password_changed_at=_iso8601(now),
+    )
