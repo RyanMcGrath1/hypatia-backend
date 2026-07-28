@@ -86,6 +86,12 @@ class HypatiaJsonFormatter(logging.Formatter):
             "request_id",
             "response_bytes",
         ),
+        "security_event": (
+            "event_type",
+            "user_id",
+            "request_id",
+            "ip_address",
+        ),
     }
 
     def __init__(
