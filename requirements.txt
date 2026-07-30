@@ -1,4 +1,4 @@
-colorlog==6.9.0
+colorlog==6.12.0
 Flask==3.0.3
 Flask-Limiter==3.12
 Flask-Migrate==4.1.0
