@@ -7,6 +7,6 @@ argon2-cffi==25.1.0
 cryptography==46.0.7
 flask-cors==5.0.0
 gunicorn==23.0.0
-pyotp==2.9.0
+pyotp==2.10.0
 python-dotenv==1.0.1
 requests==2.32.3
